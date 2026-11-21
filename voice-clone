@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Entry point. Installs uv if needed, syncs the project's Python 3.12 environment, then runs the CLI.
+# Usage: ./voice-clone <command> [options]   (./voice-clone --help)
+set -euo pipefail
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+export PATH="$HOME/.local/bin:$PATH"
+
+if ! command -v uv >/dev/null; then
+    if ! command -v curl >/dev/null; then
+        echo "curl is required to install uv. Install it with your package manager and try again." >&2
+        exit 1
+    fi
+    echo "Installing uv (Python environment manager) into ~/.local/bin..." >&2
+    curl -LsSf https://astral.sh/uv/install.sh | sh >&2
+fi
+
+uv sync --project "$ROOT" --quiet
+exec "$ROOT/.venv/bin/voice-clone" "$@"
