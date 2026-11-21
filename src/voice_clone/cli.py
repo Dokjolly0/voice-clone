@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+from pathlib import Path
 
 from voice_clone import __version__
 from voice_clone.util import UserError
@@ -19,6 +20,47 @@ def cmd_doctor(args):
     installer.doctor()
 
 
+def cmd_new(args):
+    from voice_clone import workspace
+
+    voice = workspace.create(args.name, args.lang)
+    print(f"Created voice {voice.name!r} ({voice.language.name}) in {voice.dir}")
+    print(f"Next: voice-clone add-audio {voice.name} <recordings...>")
+
+
+def cmd_list(args):
+    from voice_clone import workspace
+
+    names = workspace.list_names()
+    if not names:
+        print("No voices yet: voice-clone new <name> --lang <language>")
+    for name in names:
+        voice = workspace.load(name)
+        print(f"{name}  ({voice.language.name}, {len(voice.inputs())} input files)")
+
+
+def cmd_languages(args):
+    from voice_clone.languages import LANGUAGES
+
+    for lang in LANGUAGES.values():
+        print(f"{lang.code:4} {lang.name:22} base voice: {lang.checkpoint}")
+
+
+def cmd_add_audio(args):
+    from voice_clone import audio, workspace
+
+    voice = workspace.load(args.name)
+    workspace.add_audio(voice, args.files)
+    total = sum(audio.duration(p) for p in voice.inputs())
+    print(f"{len(voice.inputs())} input files, {total:.1f} s in total")
+
+
+def cmd_remove_audio(args):
+    from voice_clone import workspace
+
+    workspace.remove_audio(workspace.load(args.name), args.files)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="voice-clone",
@@ -33,6 +75,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("doctor", help="report what is installed, without changing anything")
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("languages", help="list supported languages")
+    p.set_defaults(func=cmd_languages)
+
+    p = sub.add_parser("new", help="create a voice workspace")
+    p.add_argument("name", help="voice name, e.g. anna (lowercase, digits, - and _)")
+    p.add_argument("--lang", required=True, help="language code, see `voice-clone languages`")
+    p.set_defaults(func=cmd_new)
+
+    p = sub.add_parser("list", help="list voices")
+    p.set_defaults(func=cmd_list)
+
+    p = sub.add_parser("add-audio", help="add recordings of the voice to clone (any format ffmpeg reads)")
+    p.add_argument("name")
+    p.add_argument("files", nargs="+", type=Path)
+    p.set_defaults(func=cmd_add_audio)
+
+    p = sub.add_parser("remove-audio", help="remove input recordings by file name")
+    p.add_argument("name")
+    p.add_argument("files", nargs="+")
+    p.set_defaults(func=cmd_remove_audio)
     return parser
 
 
