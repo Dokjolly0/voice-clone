@@ -88,11 +88,27 @@ def dataset_settings(args):
 
 
 def cmd_dataset(args):
-    from voice_clone import dataset, sentences, workspace
+    from voice_clone import dataset, inhibit, sentences, workspace
 
     voice = workspace.load(args.name)
+    inhibit.keep_awake(f"voice-clone: generating the dataset of {voice.name}")
     sentences.choose(voice, args.sentences, extra=args.extra)
     dataset.build(voice, dataset_settings(args))
+
+
+def train_settings(args):
+    from voice_clone.train import Settings
+
+    return Settings(epochs=args.epochs, batch_size=args.batch_size, num_workers=args.num_workers,
+                    resume=args.resume)
+
+
+def cmd_train(args):
+    from voice_clone import inhibit, train, workspace
+
+    voice = workspace.load(args.name)
+    inhibit.keep_awake(f"voice-clone: training {voice.name}")
+    train.run(voice, train_settings(args))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -155,7 +171,19 @@ def build_parser() -> argparse.ArgumentParser:
     add_sentence_args(p)
     add_dataset_args(p)
     p.set_defaults(func=cmd_dataset)
+
+    p = sub.add_parser("train", help="fine-tune Piper on the dataset (keeps the computer awake)")
+    p.add_argument("name")
+    add_train_args(p)
+    p.set_defaults(func=cmd_train)
     return parser
+
+
+def add_train_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--epochs", type=int, default=2000, help="total epochs (default 2000)")
+    p.add_argument("--batch-size", type=int, default=0, help="default: chosen from the GPU memory (32 on 24 GB)")
+    p.add_argument("--num-workers", type=int, default=4, help="data loader processes (default 4)")
+    p.add_argument("--resume", action="store_true", help="continue from the last checkpoint")
 
 
 def add_dataset_args(p: argparse.ArgumentParser) -> None:
