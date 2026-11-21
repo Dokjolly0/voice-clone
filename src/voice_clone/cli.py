@@ -61,6 +61,20 @@ def cmd_remove_audio(args):
     workspace.remove_audio(workspace.load(args.name), args.files)
 
 
+def cmd_reference(args):
+    from voice_clone import reference, workspace
+
+    reference.build(workspace.load(args.name), max_seconds=args.max_seconds, retranscribe=args.retranscribe)
+
+
+def cmd_try_voice(args):
+    from voice_clone import reference, workspace
+
+    voice = workspace.load(args.name)
+    out = args.output or voice.reference_dir / "try.wav"
+    reference.try_voice(voice, args.text, out, seed=args.seed)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="voice-clone",
@@ -96,6 +110,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name")
     p.add_argument("files", nargs="+")
     p.set_defaults(func=cmd_remove_audio)
+
+    p = sub.add_parser("reference", help="merge the inputs, transcribe them and build the Drama 3 voice")
+    p.add_argument("name")
+    p.add_argument("--max-seconds", type=float, default=30.0,
+                   help="longest reference Drama 3 hears, cut at a pause (default 30)")
+    p.add_argument("--retranscribe", action="store_true", help="discard transcript.txt and recognize it again")
+    p.set_defaults(func=cmd_reference)
+
+    p = sub.add_parser("try-voice", help="speak one sentence with Drama 3, to check the cloned voice")
+    p.add_argument("name")
+    p.add_argument("text")
+    p.add_argument("-o", "--output", type=Path, help="output WAV (default reference/try.wav)")
+    p.add_argument("--seed", type=int, default=1)
+    p.set_defaults(func=cmd_try_voice)
     return parser
 
 
