@@ -54,3 +54,24 @@ def test_best_checkpoint_has_lowest_val_mel(voices_dir):
     assert train.best_checkpoint(voice).name == "epoch=20-val_mel=0.3900.ckpt"
     assert train.last_checkpoint(voice).name == "last.ckpt"
     assert train.progress(voice)["best_epoch"] == 20
+
+
+def test_prune_keeps_best_across_runs_and_newest_last(voices_dir):
+    import os
+
+    from voice_clone import workspace
+
+    voice = workspace.create("anna", "it")
+    names = {0: ["epoch=1-val_mel=0.5000.ckpt", "epoch=2-val_mel=0.4000.ckpt", "last.ckpt"],
+             1: ["epoch=5-val_mel=0.3000.ckpt", "epoch=6-val_mel=0.4500.ckpt", "last.ckpt"]}
+    for version, files in names.items():
+        d = voice.training_dir / "lightning_logs" / f"version_{version}" / "checkpoints"
+        d.mkdir(parents=True)
+        for n, name in enumerate(files):
+            (d / name).write_bytes(b"")
+            os.utime(d / name, (1000 + version * 10 + n, 1000 + version * 10 + n))
+    assert train.prune_checkpoints(voice, keep=2) == 3
+    left = sorted(str(p.relative_to(voice.training_dir / "lightning_logs"))
+                  for p in voice.training_dir.rglob("*.ckpt"))
+    assert left == ["version_0/checkpoints/epoch=2-val_mel=0.4000.ckpt",
+                    "version_1/checkpoints/epoch=5-val_mel=0.3000.ckpt", "version_1/checkpoints/last.ckpt"]

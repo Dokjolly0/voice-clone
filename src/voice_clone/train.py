@@ -89,6 +89,28 @@ def best_checkpoint(voice: Voice) -> Path | None:
     return found[0] if found else None
 
 
+def prune_checkpoints(voice: Voice, keep: int = 5) -> int:
+    """Keep the `keep` best checkpoints by val_mel across all runs, plus the newest last.ckpt; delete the rest.
+
+    Every resumed run gets its own lightning_logs/version_N with up to 5 best checkpoints and a last.ckpt of
+    ~850 MB each, so without pruning a few resumes fill tens of GB. Call only while no training runs.
+    Returns the number of files deleted.
+    """
+    def val(p: Path) -> float:
+        m = re.search(r"val_mel=(\d+\.\d+)\.ckpt$", p.name)
+        return float(m.group(1)) if m else float("inf")
+
+    scored = sorted(voice.training_dir.glob("lightning_logs/version_*/checkpoints/epoch=*.ckpt"), key=val)
+    lasts = sorted(voice.training_dir.glob("lightning_logs/version_*/checkpoints/last.ckpt"),
+                   key=lambda p: p.stat().st_mtime)
+    doomed = scored[keep:] + lasts[:-1]
+    for path in doomed:
+        path.unlink(missing_ok=True)
+    if doomed:
+        info(f"removed {len(doomed)} old checkpoints (kept the {keep} best and the latest)")
+    return len(doomed)
+
+
 def command(voice: Voice, settings: Settings) -> list[str]:
     metadata = voice.dataset_dir / "metadata.csv"
     if not metadata.exists():
@@ -141,6 +163,7 @@ def run(voice: Voice, settings: Settings | None = None) -> None:
     if not piper_ready():
         raise UserError("Piper is not installed: run `voice-clone setup`")
     cmd = command(voice, settings)
+    prune_checkpoints(voice)
     step(f"Training {settings.epochs} epochs (follow it with `voice-clone status {voice.name}`)")
     voice.training_dir.mkdir(parents=True, exist_ok=True)
     write_json(voice.training_dir / "run.json", {"epochs": settings.epochs})
@@ -158,6 +181,7 @@ def run(voice: Voice, settings: Settings | None = None) -> None:
                 print(text, end="", flush=True)
         finally:
             code = proc.wait()
+    prune_checkpoints(voice)
     if code != 0:
         oom = "out of memory" in log_path.read_text(encoding="utf-8", errors="replace")[-20000:]
         hint = " The GPU ran out of memory: try a smaller --batch-size." if oom else ""
@@ -189,7 +213,9 @@ def eta_seconds(voice: Voice, window: int = 20) -> float | None:
     if not state or not rows:
         return None
     # Wall time between consecutive epochs also counts checkpoint saving; fall back to the epoch's own duration.
-    durations = [b["time"] - a["time"] for a, b in zip(rows, rows[1:]) if b["epoch"] == a["epoch"] + 1]
+    # Pairs spanning a pause (a resumed run) are skipped: their gap is far longer than the epoch itself.
+    durations = [b["time"] - a["time"] for a, b in zip(rows, rows[1:])
+                 if b["epoch"] == a["epoch"] + 1 and b["time"] - a["time"] <= 2 * b["seconds"] + 30]
     durations = durations or [r["seconds"] for r in rows]
     remaining = max(0, state["max_epochs"] - state["epoch"])
     return remaining * sum(durations) / len(durations)
