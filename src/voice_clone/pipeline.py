@@ -86,3 +86,46 @@ def run(voice: Voice, *, max_seconds: float, sentence_count: int, extra, dataset
 
     step("Stage 5/5: export and test")
     export.export_and_test(voice, checkpoint=checkpoint)
+
+
+STEP_KEYS = ("audio", "reference", "dataset", "training", "export")
+
+
+def steps(voice: Voice, job_progress: dict | None = None) -> list[dict]:
+    """The five stages with a state each: 'done', 'running', 'todo' or 'locked' (a stage before it is missing),
+    plus the facts the UI shows. A done stage can always be run again."""
+    s = status(voice)
+    jp = job_progress if job_progress is not None else jobs.progress(voice)
+    ref, data, tr = s["reference"], s["dataset"], s["training"]
+    done = [
+        s["inputs"] > 0,
+        bool(ref["voice"]),
+        data["exported"] > 0,
+        bool(tr["finished"]),
+        bool(s["exported"]),
+    ]
+    # What each stage needs before it can start.
+    ready = [True, s["inputs"] > 0, bool(ref["voice"]), data["exported"] > 0, tr["last"] is not None]
+    result = []
+    for i, key in enumerate(STEP_KEYS):
+        if jp["running"] and jp["stage"] == i + 1:
+            state = "running"
+        elif done[i]:
+            state = "done"
+        elif ready[i]:
+            state = "todo"
+        else:
+            state = "locked"
+        result.append({"key": key, "number": i + 1, "state": state, "ready": ready[i]})
+    return result
+
+
+def next_step(step_list: list[dict]) -> int:
+    """1-based number of the stage to show by default: the running one, else the first not done."""
+    for st in step_list:
+        if st["state"] == "running":
+            return st["number"]
+    for st in step_list:
+        if st["state"] != "done":
+            return st["number"]
+    return len(step_list)

@@ -102,3 +102,97 @@ def background(voice: Voice, argv: list[str]) -> None:
     print(f"Started in the background (pid {job['pid']}): voice-clone {' '.join(args)}")
     print(f"Follow it with: voice-clone log {voice.name} -f   ·   status: voice-clone status {voice.name}"
           f"   ·   stop: voice-clone stop {voice.name}")
+
+
+# --- progress -------------------------------------------------------------------------------------------------------
+
+# Step headers the stages print ("==> ..."), mapped to a phase name and the stage (1-5) it belongs to.
+PHASES = [
+    ("Merging", "merging", 2),
+    ("Transcribing the reference", "transcribing", 2),
+    ("Building the Drama 3 voice", "building_voice", 2),
+    ("Choosing sentences", "choosing_sentences", 3),
+    ("Generating", "generating", 3),
+    ("Verifying", "verifying", 3),
+    ("Exporting the dataset", "exporting_dataset", 3),
+    ("Downloading the base voice", "downloading_base", 4),
+    ("Training", "training", 4),
+    ("Exporting", "exporting", 5),
+    ("Speaking", "speaking", 5),
+]
+COMMAND_STAGE = {"reference": 2, "try-voice": 2, "sentences": 3, "dataset": 3, "train": 4, "export": 5}
+
+
+def _phase_of(header: str) -> tuple[str, int]:
+    for prefix, phase, stage in PHASES:
+        if header.startswith(prefix):
+            return phase, stage
+    return "working", 0
+
+
+def progress(voice: Voice) -> dict:
+    """What the current (or last) job is doing: phase, stage 1-5, done/total, seconds left, and its error if it
+    failed. Read from the job log, and for training from training/progress.json."""
+    job = current(voice)
+    last = read_json(voice.logs_dir / "job.json") or {}
+    text = log_tail(voice, 200_000)
+    lines = text.splitlines()
+    result = {"running": job is not None, "command": last.get("args", []), "phase": "idle", "stage": 0,
+              "done": None, "total": None, "eta": None, "error": None, "finished": False}
+    if not lines:
+        return result
+    if last.get("args"):
+        result["stage"] = COMMAND_STAGE.get(last["args"][0], 0)
+
+    header_at = max((i for i, l in enumerate(lines) if l.startswith("==> ")), default=None)
+    if header_at is not None:
+        header = lines[header_at][4:]
+        result["phase"], stage = _phase_of(header)
+        result["stage"] = stage or result["stage"]
+        after = lines[header_at + 1:]
+        if result["phase"] == "generating":
+            m = re.search(r"Generating (\d+) clips", header)
+            result["total"] = int(m.group(1)) if m else None
+            result["done"] = 0
+            for line in reversed(after):
+                m = re.match(r"\[(\d+)/(\d+)\].*~(\d+) min left", line)
+                if m:
+                    result["done"], result["total"] = int(m.group(1)), int(m.group(2))
+                    result["eta"] = int(m.group(3)) * 60
+                    break
+            else:
+                result["phase"] = "loading_model"
+        elif result["phase"] == "verifying":
+            m = re.search(r"Verifying (\d+) clips", header)
+            result["total"], result["done"] = (int(m.group(1)) if m else None), 0
+            for line in reversed(after):
+                m = re.match(r"verified (\d+)/(\d+)", line)
+                if m:
+                    result["done"], result["total"] = int(m.group(1)), int(m.group(2))
+                    break
+        elif result["phase"] == "training":
+            from voice_clone import train
+
+            state = read_json(voice.training_dir / "progress.json") or {}
+            started = datetime.fromisoformat(last["started"]).timestamp() if last.get("started") else 0
+            m = re.search(r"Training (\d+) epochs", header)
+            result["total"] = int(m.group(1)) if m else state.get("max_epochs")
+            if state and state.get("updated", 0) >= started:
+                result["done"], result["total"] = state["epoch"], state["max_epochs"]
+                result["eta"] = train.eta_seconds(voice)
+            else:
+                result["done"] = None  # preparing: phonemizing the dataset, loading the base voice
+        elif result["phase"] == "speaking":
+            m = re.search(r"Speaking (\d+) test sentences", header)
+            result["total"] = int(m.group(1)) if m else None
+            result["done"] = sum(1 for l in after if l.startswith("samples/sample-"))
+
+    if not job:
+        errors = [l for l in lines[-30:] if l.startswith("error: ")]
+        if errors:
+            result["error"] = errors[-1][len("error: "):]
+        elif any(l.startswith("interrupted") for l in lines[-5:]):
+            result["error"] = "interrupted"
+        else:
+            result["finished"] = True
+    return result
