@@ -111,6 +111,19 @@ def cmd_train(args):
     train.run(voice, train_settings(args))
 
 
+def cmd_export(args):
+    from voice_clone import export, workspace
+
+    export.export_and_test(workspace.load(args.name), checkpoint=args.checkpoint, extra=args.sample)
+
+
+def cmd_say(args):
+    from voice_clone import export, workspace
+
+    out = export.say(workspace.load(args.name), args.text, args.output)
+    print(out)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="voice-clone",
@@ -176,7 +189,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name")
     add_train_args(p)
     p.set_defaults(func=cmd_train)
+
+    p = sub.add_parser("export", help="export a checkpoint to ONNX and speak test sentences into samples/")
+    p.add_argument("name")
+    add_export_args(p)
+    p.set_defaults(func=cmd_export)
+
+    p = sub.add_parser("say", help="speak text with the exported model")
+    p.add_argument("name")
+    p.add_argument("text")
+    p.add_argument("-o", "--output", type=Path, default=Path("say.wav"), help="output WAV (default say.wav)")
+    p.set_defaults(func=cmd_say)
     return parser
+
+
+def add_export_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--checkpoint", default="last",
+                   help="'last' (default), 'best' (lowest validation loss) or a .ckpt path")
+    p.add_argument("--sample", action="append", metavar="TEXT", help="extra test sentence (repeatable)")
 
 
 def add_train_args(p: argparse.ArgumentParser) -> None:
