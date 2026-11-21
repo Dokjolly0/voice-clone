@@ -75,6 +75,12 @@ def cmd_try_voice(args):
     reference.try_voice(voice, args.text, out, seed=args.seed)
 
 
+def cmd_sentences(args):
+    from voice_clone import sentences, workspace
+
+    sentences.choose(workspace.load(args.name), args.sentences, extra=args.extra)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="voice-clone",
@@ -124,7 +130,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", type=Path, help="output WAV (default reference/try.wav)")
     p.add_argument("--seed", type=int, default=1)
     p.set_defaults(func=cmd_try_voice)
+
+    p = sub.add_parser("sentences", help="choose the dataset sentences (Common Voice + optional domain file)")
+    p.add_argument("name")
+    add_sentence_args(p)
+    p.set_defaults(func=cmd_sentences)
     return parser
+
+
+def add_sentence_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("-n", "--sentences", type=int, default=1000,
+                   help="number of sentences in the dataset (default 1000, about 1 hour of speech)")
+    p.add_argument("--extra", type=Path,
+                   help="text file of domain sentences, one per line, always included first")
 
 
 def main(argv: list[str] | None = None) -> None:
