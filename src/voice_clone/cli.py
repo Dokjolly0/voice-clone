@@ -182,6 +182,12 @@ def cmd_log(args):
                 time.sleep(1)
 
 
+def cmd_web(args):
+    from voice_clone import web
+
+    web.serve(host=args.host, port=args.port, share=args.share)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="voice-clone",
@@ -282,6 +288,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("stop", help="stop the background job cleanly (it can be resumed)")
     p.add_argument("name")
     p.set_defaults(func=cmd_stop)
+
+    p = sub.add_parser("web", help="open the web interface (http://127.0.0.1:7860)")
+    p.add_argument("--host", default="127.0.0.1", help="address to listen on (0.0.0.0 for the local network)")
+    p.add_argument("--port", type=int, default=7860)
+    p.add_argument("--share", action="store_true", help="also publish a temporary public gradio.live link")
+    p.set_defaults(func=cmd_web)
 
     for name in BACKGROUND_COMMANDS:
         sub.choices[name].add_argument("--background", action="store_true",
