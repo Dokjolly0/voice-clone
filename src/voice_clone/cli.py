@@ -81,6 +81,20 @@ def cmd_sentences(args):
     sentences.choose(workspace.load(args.name), args.sentences, extra=args.extra)
 
 
+def dataset_settings(args):
+    from voice_clone.dataset import Settings
+
+    return Settings(max_attempts=args.max_attempts, max_cer=args.max_cer, limit=args.limit)
+
+
+def cmd_dataset(args):
+    from voice_clone import dataset, sentences, workspace
+
+    voice = workspace.load(args.name)
+    sentences.choose(voice, args.sentences, extra=args.extra)
+    dataset.build(voice, dataset_settings(args))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="voice-clone",
@@ -135,7 +149,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name")
     add_sentence_args(p)
     p.set_defaults(func=cmd_sentences)
+
+    p = sub.add_parser("dataset", help="generate the dataset with Drama 3, verify it with Qwen3-ASR, export it")
+    p.add_argument("name")
+    add_sentence_args(p)
+    add_dataset_args(p)
+    p.set_defaults(func=cmd_dataset)
     return parser
+
+
+def add_dataset_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--max-attempts", type=int, default=4, help="generations per sentence before giving up (4)")
+    p.add_argument("--max-cer", type=float, default=0.05,
+                   help="largest character error rate a clip may have to be kept (0.05)")
+    p.add_argument("--limit", type=int, default=0, help="generate at most N clips, for a quick test")
 
 
 def add_sentence_args(p: argparse.ArgumentParser) -> None:
