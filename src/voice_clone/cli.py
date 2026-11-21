@@ -124,6 +124,27 @@ def cmd_say(args):
     print(out)
 
 
+def cmd_compare(args):
+    from voice_clone import export, workspace
+
+    export.compare(workspace.load(args.name), args.first, args.second)
+
+
+def cmd_promote(args):
+    from voice_clone import export, workspace
+
+    export.promote(workspace.load(args.name), args.label)
+
+
+def cmd_checkpoints(args):
+    from voice_clone import export, workspace
+
+    for c in export.checkpoints(workspace.load(args.name)):
+        epoch = f"(epoch-{c.epoch})" if c.label == "last" and c.epoch is not None else ""
+        score = f"val_mel {c.val_mel:.4f}" if c.val_mel is not None else ""
+        print(f"{c.label:12} {epoch:12} {score}")
+
+
 def cmd_status(args):
     import json
 
@@ -265,6 +286,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", type=Path, default=Path("say.wav"), help="output WAV (default say.wav)")
     p.set_defaults(func=cmd_say)
 
+    p = sub.add_parser("checkpoints", help="list the checkpoints kept so far")
+    p.add_argument("name")
+    p.set_defaults(func=cmd_checkpoints)
+
+    p = sub.add_parser("compare", help="export two checkpoints with the same test sentences, to choose by ear")
+    p.add_argument("name")
+    p.add_argument("first", help="'last', 'best', an epoch number or a .ckpt path")
+    p.add_argument("second")
+    p.set_defaults(func=cmd_compare)
+
+    p = sub.add_parser("promote", help="make a compared checkpoint (e.g. epoch-1816) the voice's model")
+    p.add_argument("name")
+    p.add_argument("label")
+    p.set_defaults(func=cmd_promote)
+
     p = sub.add_parser("run", help="every stage in order (reference, dataset, train, export), skipping done ones")
     p.add_argument("name")
     p.add_argument("--max-seconds", type=float, default=30.0, help="longest reference (default 30)")
@@ -301,12 +337,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-BACKGROUND_COMMANDS = ("reference", "dataset", "train", "export", "run")
+BACKGROUND_COMMANDS = ("reference", "dataset", "train", "export", "compare", "run")
 
 
 def add_export_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--checkpoint", default="last",
-                   help="'last' (default), 'best' (lowest validation loss) or a .ckpt path")
+                   help="'last' (default), 'best' (lowest validation loss), an epoch number or a .ckpt path")
     p.add_argument("--sample", action="append", metavar="TEXT", help="extra test sentence (repeatable)")
 
 
