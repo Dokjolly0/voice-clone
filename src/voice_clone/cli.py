@@ -100,7 +100,7 @@ def train_settings(args):
     from voice_clone.train import Settings
 
     return Settings(epochs=args.epochs, batch_size=args.batch_size, num_workers=args.num_workers,
-                    resume=args.resume)
+                    resume=getattr(args, "resume", False))
 
 
 def cmd_train(args):
@@ -122,6 +122,64 @@ def cmd_say(args):
 
     out = export.say(workspace.load(args.name), args.text, args.output)
     print(out)
+
+
+def cmd_status(args):
+    import json
+
+    from voice_clone import pipeline, workspace
+
+    names = [args.name] if args.name else workspace.list_names()
+    if not names:
+        print("No voices yet: voice-clone new <name> --lang <language>")
+    for name in names:
+        s = pipeline.status(workspace.load(name))
+        print(json.dumps(s, indent=1, default=str) if args.json else pipeline.format_status(s))
+
+
+def cmd_run(args):
+    from voice_clone import inhibit, pipeline, workspace
+
+    voice = workspace.load(args.name)
+    inhibit.keep_awake(f"voice-clone: building {voice.name}")
+    pipeline.run(voice, max_seconds=args.max_seconds, sentence_count=args.sentences, extra=args.extra,
+                 dataset_settings=dataset_settings(args), train_settings=train_settings(args),
+                 checkpoint=args.checkpoint)
+
+
+def cmd_stop(args):
+    from voice_clone import jobs, workspace
+
+    voice = workspace.load(args.name)
+    print("stopping..." if jobs.current(voice) else "nothing is running")
+    if jobs.stop(voice):
+        print("stopped; run the same command again to resume")
+
+
+def cmd_log(args):
+    import time
+
+    from voice_clone import jobs, workspace
+
+    voice = workspace.load(args.name)
+    path = voice.logs_dir / "job.log"
+    if not path.exists():
+        print("no background job has run yet")
+        return
+    if not args.follow:
+        print(jobs.log_tail(voice, 200_000 if args.all else 8000))
+        return
+    with open(path, "rb") as f:
+        f.seek(max(0, path.stat().st_size - 8000))
+        while True:
+            chunk = f.read()
+            if chunk:
+                sys.stdout.write(chunk.decode(errors="replace"))
+                sys.stdout.flush()
+            elif not jobs.current(voice):
+                break
+            else:
+                time.sleep(1)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -200,7 +258,38 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("text")
     p.add_argument("-o", "--output", type=Path, default=Path("say.wav"), help="output WAV (default say.wav)")
     p.set_defaults(func=cmd_say)
+
+    p = sub.add_parser("run", help="every stage in order (reference, dataset, train, export), skipping done ones")
+    p.add_argument("name")
+    p.add_argument("--max-seconds", type=float, default=30.0, help="longest reference (default 30)")
+    add_sentence_args(p)
+    add_dataset_args(p)
+    add_train_args(p, resume=False)
+    add_export_args(p)
+    p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("status", help="where each stage of a voice (or of every voice) stands")
+    p.add_argument("name", nargs="?")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("log", help="show the log of the background job")
+    p.add_argument("name")
+    p.add_argument("-f", "--follow", action="store_true", help="keep printing until the job ends")
+    p.add_argument("--all", action="store_true", help="show more of the log")
+    p.set_defaults(func=cmd_log)
+
+    p = sub.add_parser("stop", help="stop the background job cleanly (it can be resumed)")
+    p.add_argument("name")
+    p.set_defaults(func=cmd_stop)
+
+    for name in BACKGROUND_COMMANDS:
+        sub.choices[name].add_argument("--background", action="store_true",
+                                       help="run detached; follow with `voice-clone log <name> -f`")
     return parser
+
+
+BACKGROUND_COMMANDS = ("reference", "dataset", "train", "export", "run")
 
 
 def add_export_args(p: argparse.ArgumentParser) -> None:
@@ -209,11 +298,12 @@ def add_export_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--sample", action="append", metavar="TEXT", help="extra test sentence (repeatable)")
 
 
-def add_train_args(p: argparse.ArgumentParser) -> None:
+def add_train_args(p: argparse.ArgumentParser, resume: bool = True) -> None:
     p.add_argument("--epochs", type=int, default=2000, help="total epochs (default 2000)")
     p.add_argument("--batch-size", type=int, default=0, help="default: chosen from the GPU memory (32 on 24 GB)")
     p.add_argument("--num-workers", type=int, default=4, help="data loader processes (default 4)")
-    p.add_argument("--resume", action="store_true", help="continue from the last checkpoint")
+    if resume:
+        p.add_argument("--resume", action="store_true", help="continue from the last checkpoint")
 
 
 def add_dataset_args(p: argparse.ArgumentParser) -> None:
@@ -232,11 +322,17 @@ def add_sentence_args(p: argparse.ArgumentParser) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
+    argv = sys.argv[1:] if argv is None else argv
     args = parser.parse_args(argv)
     if not getattr(args, "func", None):
         parser.print_help()
         sys.exit(1)
     try:
+        if getattr(args, "background", False):
+            from voice_clone import jobs, workspace
+
+            jobs.background(workspace.load(args.name), argv)
+            return
         args.func(args)
     except UserError as exc:
         print(f"error: {exc}", file=sys.stderr)
