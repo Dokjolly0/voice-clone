@@ -57,6 +57,13 @@ Then, either from the **web interface**:
 ./voice-clone web        # open http://127.0.0.1:7860
 ```
 
+The page (in Italian) is a guided wizard: the sidebar lists your voices and the five steps, each marked done ✓,
+running ▶, to do ○ or locked 🔒 until the step before it is done. The main area shows one step at a time with a
+single main action; rarely needed settings sit under "Opzioni avanzate". At the bottom, the job panel shows what is
+running, a progress bar with counts and time left, errors, a Stop button and the log. Step 4 charts the training
+quality (val_mel per epoch); step 5 plays the test sentences, lets you type any sentence, offers the model files for
+download, and compares two checkpoints side by side.
+
 or from the **command line**:
 
 ```sh
@@ -102,12 +109,15 @@ The result is in `voices/anna/export/`, and test sentences are in `voices/anna/s
 | `train NAME [--epochs 2000] [--batch-size N] [--resume]` | fine-tune Piper |
 | `export NAME [--checkpoint last\|best\|PATH] [--sample "text"]` | ONNX export and test sentences (works mid-training) |
 | `say NAME "text" [-o out.wav]` | speak with the exported model |
+| `checkpoints NAME` | list the kept checkpoints and their val_mel |
+| `compare NAME A B` | export two checkpoints (`last`, `best`, an epoch number) with the same test sentences into `export/variants/` |
+| `promote NAME LABEL` | make a compared checkpoint (e.g. `epoch-1816`) the voice's model |
 | `run NAME [options of the stages above]` | every stage in order, skipping what is done, resuming training |
 | `status [NAME] [--json]` | where each stage stands |
 | `log NAME [-f]` / `stop NAME` | follow or cleanly stop the background job |
 | `web [--host] [--port] [--share]` | the web interface |
 
-`reference`, `dataset`, `train`, `export` and `run` accept `--background`: the job keeps running after you close
+`reference`, `dataset`, `train`, `export`, `compare` and `run` accept `--background`: the job keeps running after you close
 the terminal or the browser, and only one job per voice runs at a time. `dataset`, `train` and `run` keep the
 computer from suspending while they run (`systemd-inhibit`; closing a laptop lid can still suspend it).
 
@@ -137,11 +147,14 @@ sentence sources and checkpoints exist, but no full run has been done. To add a 
 |---|---|
 | setup | 20–40 min, mostly the 21 GB download |
 | reference | 1–2 min |
-| dataset, 1000 sentences | roughly 1–2 h (estimate: Drama 3 ran at 1.7× real time in a short run, plus checks and retries) |
+| dataset, 1000 sentences | about 1 h (estimate: Drama 3 ran at 1.7× real time in a short run, plus checks and retries) |
 | training, 2000 epochs on ~1 h of audio | about 5 h (measured: ≈ 9 s per epoch at batch size 32) |
 | export | under a minute |
 
 On a GPU with less memory, training uses a smaller batch size, chosen automatically, and takes longer.
+
+Disk: each checkpoint is about 850 MB. Training keeps the five best by val_mel (across resumed runs) and the latest
+`last.ckpt`, about 5 GB per voice, and deletes older ones before and after every run.
 
 ## Files
 
@@ -154,8 +167,10 @@ voices/<name>/
   state.json            per-clip progress: seed, attempts, what the recognizer heard, error rate
   clips/                Drama 3 output
   dataset/              wav/ at 22050 Hz + metadata.csv (Piper's input)
-  training/             train.log, lightning_logs/version_*/checkpoints/ (5 best by val_mel + last.ckpt)
-  export/               <locale>-<name>-medium.onnx + .onnx.json
+  training/             train.log, metrics.csv (val_mel per epoch), progress.json,
+                        lightning_logs/version_*/checkpoints/ (5 best by val_mel + latest last.ckpt)
+  export/               <locale>-<name>-medium.onnx + .onnx.json, source.json (which checkpoint),
+                        variants/<label>/ (compared checkpoints with their samples)
   samples/              test sentences spoken by the exported model
   logs/                 background job log and pid, speech serve log
 ```
