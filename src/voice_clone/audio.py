@@ -11,8 +11,19 @@ from voice_clone.util import UserError
 AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".wma", ".webm", ".mp4", ".mkv"}
 
 
+_DURATIONS: dict[tuple[str, int, int], float] = {}
+
+
 def duration(path: Path) -> float:
-    """Duration in seconds of any file ffprobe can read."""
+    """Duration in seconds of any file ffprobe can read (cached per file version: status pages ask often)."""
+    st = Path(path).stat()
+    key = (str(path), st.st_size, st.st_mtime_ns)
+    if key not in _DURATIONS:
+        _DURATIONS[key] = _probe_duration(path)
+    return _DURATIONS[key]
+
+
+def _probe_duration(path: Path) -> float:
     try:
         out = subprocess.run(
             ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "format=duration",
