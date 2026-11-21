@@ -27,6 +27,7 @@ it was.
 - Linux with `dnf` (Fedora) or `apt` (Ubuntu/Debian). Tested on Fedora 45.
 - An **NVIDIA GPU** with the proprietary driver: 8 GB of VRAM at the very least, 16–24 GB recommended (Drama 3
   alone uses up to 15 GB of RAM and 7+ GB of VRAM). Tested on an RTX 4090.
+  Without one, a **CPU-only mode** works too, much more slowly: see [CPU-only mode](#cpu-only-mode).
 - About 30 GB of free disk space (Drama 3 is 20.8 GB) and an internet connection for the first setup.
 
 You do **not** need to install Python, PyTorch or CUDA yourself: the project brings its own.
@@ -45,6 +46,9 @@ mostly downloads:
 - **speech.cpp** (Vulkan build) in `~/.local/bin`, with **Drama 3** and **Qwen3-ASR 0.6B** in `~/.cache/speech.cpp`;
 - **Piper's training code**, pinned to a tested commit, in `third_party/piper1-gpl` with its own PyTorch + CUDA
   environment, and its compiled extensions built.
+
+`setup` picks GPU mode when a working NVIDIA driver is found and CPU mode otherwise; force one with
+`--device gpu` or `--device cpu` (the choice is saved in `settings.json`).
 
 If system packages are missing, `setup` stops and prints the one `sudo` command to run, for example
 `sudo dnf install -y gcc-c++ cmake ninja-build git`; run it and run `setup` again. Without a working NVIDIA driver
@@ -96,7 +100,7 @@ The result is in `voices/anna/export/`, and test sentences are in `voices/anna/s
 
 | Command | What it does |
 |---|---|
-| `setup [--skip-models]` | install and verify everything (no root needed; prints the sudo command if packages are missing) |
+| `setup [--skip-models] [--device auto\|gpu\|cpu]` | install and verify everything (no root needed; prints the sudo command if packages are missing) |
 | `doctor` | report what is installed, change nothing |
 | `languages` | list supported languages and their base Piper voice |
 | `new NAME --lang L` | create the voice workspace `voices/NAME/` |
@@ -155,6 +159,29 @@ On a GPU with less memory, training uses a smaller batch size, chosen automatica
 
 Disk: each checkpoint is about 850 MB. Training keeps the five best by val_mel (across resumed runs) and the latest
 `last.ckpt`, about 5 GB per voice, and deletes older ones before and after every run.
+
+## CPU-only mode
+
+Every stage also runs without a GPU: `./voice-clone setup --device cpu` (chosen automatically when no NVIDIA driver
+works). speech.cpp then runs Drama 3 and Qwen3-ASR on the CPU, Piper gets a CPU-only PyTorch (no CUDA libraries),
+and training runs on the CPU. The result is the same kind of model, but it takes much longer:
+
+| | RTX 4090 | Ryzen 9 7950X3D (16 cores), CPU only |
+|---|---|---|
+| Drama 3 speed (measured) | 1.7× real time | 0.27× real time |
+| Training speed (measured, batch 32) | ~0.3 s per batch | ~5.6 s per batch |
+| Dataset of 1000 sentences (estimate) | ~1 h | ~4 h |
+| 2000 training epochs on ~1 h of audio (estimate) | ~5 h | ~3 days |
+
+- **RAM**: Drama 3 holds about 21 GB on the CPU; 32 GB of RAM is the practical minimum.
+- **Smaller CPUs** are much slower: a 4-core desktop CPU (e.g. a 6th-generation Core i7) would need weeks of
+  training, which is not practical. On such machines, train elsewhere (a GPU, or a rented cloud GPU for a few hours)
+  and only *use* the exported model there: it runs in real time on modest CPUs.
+- **Fewer epochs**: starting from a trained voice, 500–1000 epochs may already sound good; export mid-training
+  (step 5, or `voice-clone export`) and listen to decide when to stop.
+- The web page shows the mode in the sidebar and estimates times for it, and once training runs, from the voice's
+  own measured epochs.
+- `VOICE_CLONE_DEVICE=cpu` (or `gpu`) overrides the saved mode for one command.
 
 ## Files
 
