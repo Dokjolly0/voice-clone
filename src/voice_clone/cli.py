@@ -11,7 +11,7 @@ from voice_clone.util import UserError
 def cmd_setup(args):
     from voice_clone import installer
 
-    installer.setup(skip_models=args.skip_models)
+    installer.setup(skip_models=args.skip_models, device=args.device)
 
 
 def cmd_doctor(args):
@@ -219,6 +219,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("setup", help="install speech.cpp, the models and Piper; check the system")
     p.add_argument("--skip-models", action="store_true", help="do not download Drama 3 and Qwen3-ASR now")
+    p.add_argument("--device", choices=["auto", "gpu", "cpu"], default="auto",
+                   help="gpu (NVIDIA, fast), cpu (no GPU, much slower) or auto (gpu if an NVIDIA driver works)")
     p.set_defaults(func=cmd_setup)
 
     p = sub.add_parser("doctor", help="report what is installed, without changing anything")
@@ -348,7 +350,7 @@ def add_export_args(p: argparse.ArgumentParser) -> None:
 
 def add_train_args(p: argparse.ArgumentParser, resume: bool = True) -> None:
     p.add_argument("--epochs", type=int, default=2000, help="total epochs (default 2000)")
-    p.add_argument("--batch-size", type=int, default=0, help="default: chosen from the GPU memory (32 on 24 GB)")
+    p.add_argument("--batch-size", type=int, default=0, help="default: chosen from the GPU memory (32 on 24 GB) or, in CPU mode, the RAM")
     p.add_argument("--num-workers", type=int, default=4, help="data loader processes (default 4)")
     if resume:
         p.add_argument("--resume", action="store_true", help="continue from the last checkpoint")

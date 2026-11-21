@@ -23,6 +23,10 @@ REQUIREMENTS = {
     "ffprobe": {"dnf": "ffmpeg-free", "apt": "ffmpeg"},
     "lib:vulkan": {"dnf": "vulkan-loader", "apt": "libvulkan1"},
 }
+GPU_ONLY = {"lib:vulkan"}  # speech.cpp's GPU build; the CPU mode does without
+
+# Drama 3 keeps about 21 GB in RAM when it runs on the CPU (and ~15 GB alongside a GPU with little VRAM).
+MIN_RAM_GIB = {"gpu": 16, "cpu": 30}
 
 DRIVER_HELP = {
     "dnf": (
@@ -49,6 +53,7 @@ class SystemReport:
     package_manager: str | None
     missing: list[str] = field(default_factory=list)
     gpu: GpuInfo | None = None
+    ram_gib: float = 0.0
 
     @property
     def missing_packages(self) -> list[str]:
@@ -100,14 +105,28 @@ def query_gpu() -> GpuInfo | None:
     return GpuInfo(name=name, memory_mib=int(float(memory)), driver=driver)
 
 
-def check() -> SystemReport:
+def ram_gib() -> float:
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemTotal:"):
+                return int(line.split()[1]) / 1024 / 1024
+    except OSError:
+        pass
+    return 0.0
+
+
+def check(device: str = "gpu") -> SystemReport:
+    """System packages needed in the given mode ("gpu" or "cpu"), the GPU if any, and the RAM."""
     osr = read_os_release()
     report = SystemReport(distro=osr.get("PRETTY_NAME", "unknown Linux"), package_manager=detect_package_manager())
     for req in REQUIREMENTS:
+        if device == "cpu" and req in GPU_ONLY:
+            continue
         if req.startswith("lib:"):
             if not ctypes.util.find_library(req[4:]):
                 report.missing.append(req)
         elif not which(req):
             report.missing.append(req)
     report.gpu = query_gpu()
+    report.ram_gib = ram_gib()
     return report

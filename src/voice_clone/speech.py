@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from voice_clone.installer import ASR_MODEL, SYNTH_MODEL, speech_bin
+from voice_clone.installer import ASR_MODEL, SYNTH_MODEL, device_args, speech_bin
 from voice_clone.util import UserError, run
 
 VOICE_NAME = "voice"
@@ -19,7 +19,8 @@ def transcribe(files: list[Path], lang: str, batch: int = 100) -> dict[str, str]
     texts = {}
     for k in range(0, len(files), batch):
         chunk = [str(f) for f in files[k:k + batch]]
-        result = subprocess.run([speech_bin(), "asr", ASR_MODEL, "--language", lang, "--format", "json", *chunk],
+        result = subprocess.run([speech_bin(), "asr", ASR_MODEL, *device_args(), "--language", lang, "--format", "json",
+                                 *chunk],
                                 capture_output=True, text=True, encoding="utf-8")
         if result.returncode != 0:
             raise UserError(f"speech asr failed: {result.stderr.strip()[-1500:]}")
@@ -57,7 +58,7 @@ class SpeechServer:
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
         log = open(self.log_file, "ab")
         self.proc = subprocess.Popen(
-            [speech_bin(), "serve", SYNTH_MODEL, "--port", str(self.port),
+            [speech_bin(), "serve", SYNTH_MODEL, *device_args(), "--port", str(self.port),
              "--add-voice", f"{VOICE_NAME}={self.voice_file}"],
             stdout=log, stderr=log)
         self._wait_healthy()

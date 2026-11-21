@@ -5,6 +5,7 @@ language's pronunciation along; the model mostly has to learn the new timbre.
 """
 
 import json
+import os
 import re
 import subprocess
 import urllib.parse
@@ -12,6 +13,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from voice_clone import settings as settings_module
 from voice_clone import system
 from voice_clone.installer import piper_ready
 from voice_clone.paths import CACHE_DIR, PIPER_PYTHON
@@ -43,6 +45,11 @@ def batch_for_vram(memory_mib: int) -> int:
     if gib >= 7:
         return 12
     return 8
+
+
+def batch_for_cpu(ram_gib: float) -> int:
+    """On the CPU the batch costs RAM, not VRAM; 32 trains fastest per epoch when it fits."""
+    return 32 if ram_gib >= 24 else 16
 
 
 def _download(url: str, dst: Path) -> None:
@@ -122,10 +129,15 @@ def command(voice: Voice, settings: Settings) -> list[str]:
     sample_rate = config.get("audio", {}).get("sample_rate", 22050)
 
     batch = settings.batch_size
+    on_cpu = settings_module.is_cpu()
     if not batch:
-        gpu = system.query_gpu()
-        batch = batch_for_vram(gpu.memory_mib) if gpu else 16
-        info(f"batch size {batch}" + (f" (for {gpu.memory_mib / 1024:.0f} GB of VRAM)" if gpu else ""))
+        if on_cpu:
+            batch = batch_for_cpu(system.ram_gib())
+            info(f"batch size {batch} (CPU mode, {system.ram_gib():.0f} GB of RAM)")
+        else:
+            gpu = system.query_gpu()
+            batch = batch_for_vram(gpu.memory_mib) if gpu else 16
+            info(f"batch size {batch}" + (f" (for {gpu.memory_mib / 1024:.0f} GB of VRAM)" if gpu else ""))
 
     voice.export_dir.mkdir(parents=True, exist_ok=True)
     cmd = [str(PIPER_PYTHON), str(ENTRY), "fit",
@@ -139,7 +151,8 @@ def command(voice: Voice, settings: Settings) -> list[str]:
            "--data.num_workers", str(settings.num_workers),
            "--model.sample_rate", str(sample_rate),
            "--trainer.max_epochs", str(settings.epochs),
-           "--trainer.default_root_dir", str(voice.training_dir)]
+           "--trainer.default_root_dir", str(voice.training_dir),
+           "--trainer.accelerator", "cpu" if on_cpu else "gpu"]
     phoneme_type = config.get("phoneme_type")
     if phoneme_type and phoneme_type != "espeak":
         cmd += ["--data.phoneme_type", phoneme_type]
@@ -166,13 +179,15 @@ def run(voice: Voice, settings: Settings | None = None) -> None:
     prune_checkpoints(voice)
     step(f"Training {settings.epochs} epochs (follow it with `voice-clone status {voice.name}`)")
     voice.training_dir.mkdir(parents=True, exist_ok=True)
-    write_json(voice.training_dir / "run.json", {"epochs": settings.epochs})
+    write_json(voice.training_dir / "run.json", {"epochs": settings.epochs, "device": settings_module.device()})
     log_path = voice.training_dir / "train.log"
     info(f"log: {log_path}")
     with open(log_path, "a", encoding="utf-8") as log:
         log.write("\n$ " + " ".join(cmd) + "\n")
         log.flush()
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=voice.training_dir)
+        env = {**os.environ, "CUDA_VISIBLE_DEVICES": ""} if settings_module.is_cpu() else None
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=voice.training_dir,
+                                env=env)
         try:
             for raw in iter(lambda: proc.stdout.read(4096), b""):
                 text = raw.decode(errors="replace")

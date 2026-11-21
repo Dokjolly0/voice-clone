@@ -9,3 +9,6 @@ third_party/
 
 # Voice workspaces: audio, datasets, checkpoints, models
 voices/
+
+# Machine settings written by `voice-clone setup`
+settings.json

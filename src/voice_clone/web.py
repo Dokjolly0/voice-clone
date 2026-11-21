@@ -17,13 +17,23 @@ from pathlib import Path
 import gradio as gr
 import pandas as pd
 
-from voice_clone import audio, dataset, export, jobs, languages, pipeline, reference, train, workspace
+from voice_clone import audio, dataset, export, jobs, languages, pipeline, reference, settings, train, workspace
 from voice_clone.util import UserError, read_json
 
 SAMPLE_SLOTS = 5
 CLIP_SLOTS = 4
 POLL_SECONDS = 3
-SECONDS_PER_EPOCH_HOUR = 10.5  # RTX 4090, batch 32: ~9 s per epoch measured on 51 min of audio
+# Measured speeds, used for estimates until the voice's own training metrics exist.
+SPEEDS = {
+    # Drama 3 real-time factor, seconds per training epoch per hour of audio, and where it was measured.
+    "gpu": {"drama_rtf": 1.7, "epoch_s_per_hour": 10.5, "where": "su una RTX 4090"},
+    "cpu": {"drama_rtf": 0.3, "epoch_s_per_hour": 170.0,
+            "where": "con la sola CPU (misurato su un Ryzen 9 16 core; su CPU più piccole molto di più)"},
+}
+
+
+def speed() -> dict:
+    return SPEEDS[settings.device()]
 
 STEP_TITLES = ["Audio", "Riferimento", "Dataset", "Addestramento", "Esporta e prova"]
 STATE_ICONS = {"done": "✓", "running": "▶", "todo": "○", "locked": "🔒"}
@@ -106,6 +116,15 @@ def dataset_minutes(voice: workspace.Voice) -> float:
         except (wave.Error, EOFError):
             pass
     return total / 60
+
+
+def device_label() -> str:
+    if settings.is_cpu():
+        return "Modalità: **solo CPU** (lenta)"
+    from voice_clone import system
+
+    gpu = system.query_gpu()
+    return f"Modalità: **GPU** ({gpu.name.replace('NVIDIA GeForce ', '')})" if gpu else "Modalità: **GPU**"
 
 
 # --- job panel -----------------------------------------------------------------------------------------------------
@@ -253,8 +272,8 @@ def dataset_estimate(name: str | None, count: float | None) -> str:
     lang = workspace.load(name).language
     avg_chars = (lang.min_chars + lang.max_chars) / 2 * 0.6  # Common Voice sentences sit in the lower half
     minutes = int(count) * avg_chars / lang.chars_per_second / 60
-    work = minutes * 60 / 1.7 * 1.3  # Drama 3 at ~1.7x real time on an RTX 4090, plus checks and retries
-    return f"≈ {minutes:.0f} min di parlato · circa {fmt_duration(work)} di lavoro su una RTX 4090"
+    work = minutes * 60 / speed()["drama_rtf"] * 1.3  # plus checks and retries
+    return f"≈ {minutes:.0f} min di parlato · circa {fmt_duration(work)} di lavoro {speed()['where']}"
 
 
 def dataset_view(name: str | None):
@@ -323,10 +342,18 @@ def training_view(name: str | None, epochs: float | None):
     target = int(epochs or 2000)
     parts = []
     minutes = dataset_minutes(voice)
-    if minutes:
-        est = target * SECONDS_PER_EPOCH_HOUR * max(minutes, 10) / 60
-        parts.append(f"{target} epoche su {minutes:.0f} min di audio: circa {fmt_duration(est)} "
-                     "su una RTX 4090.")
+    run_device = read_json(voice.training_dir / "run.json", {}).get("device", "gpu")
+    measured = train.metrics(voice)[-20:] if run_device == settings.device() else []
+    if measured:  # this voice's own recent epochs, on the same kind of device
+        per_epoch = sum(r["seconds"] for r in measured) / len(measured)
+        parts.append(f"{target} epoche: circa {fmt_duration(target * per_epoch)} in tutto, misurato sulle ultime "
+                     f"epoche ({per_epoch:.0f} s l'una).")
+    elif minutes:
+        est = target * speed()["epoch_s_per_hour"] * max(minutes, 10) / 60
+        parts.append(f"{target} epoche su {minutes:.0f} min di audio: circa {fmt_duration(est)} {speed()['where']}.")
+    if settings.is_cpu():
+        parts.append("Con la sola CPU l'addestramento è lento: valuta 500–1000 epoche, e ascolta le prove a metà "
+                     "strada (passo 5) per decidere quando fermarti.")
     if prog["best_val_mel"] is not None:
         parts.append(f"Migliore finora: **val_mel {prog['best_val_mel']:.4f}** all'epoca {prog['best_epoch']}. "
                      "Più basso è meglio; quando la curva si appiattisce, la voce migliora soprattutto in pulizia.")
@@ -465,6 +492,7 @@ def build() -> gr.Blocks:
         # --- sidebar ----------------------------------------------------------------------------------------
         with gr.Sidebar(open=True):
             gr.Markdown("## 🎙️ voice-clone")
+            gr.Markdown(device_label(), elem_classes="vc-muted")
             voice_radio = gr.Radio(choices=names, value=names[0] if names else None, label="Voci")
             new_btn = gr.Button("＋ Nuova voce", size="sm")
             gr.Markdown("**Passi**")
