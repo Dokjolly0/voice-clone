@@ -15,7 +15,7 @@ from pathlib import Path
 from voice_clone import system
 from voice_clone.installer import piper_ready
 from voice_clone.paths import CACHE_DIR, PIPER_PYTHON
-from voice_clone.util import UserError, info, step, warn, write_json
+from voice_clone.util import UserError, info, read_json, step, warn, write_json
 from voice_clone.workspace import Voice
 
 HF_TREE = "https://huggingface.co/api/datasets/rhasspy/piper-checkpoints/tree/main/"
@@ -164,6 +164,35 @@ def run(voice: Voice, settings: Settings | None = None) -> None:
         raise UserError(f"training stopped with exit code {code}; see {log_path}.{hint} "
                         f"Continue with `voice-clone train {voice.name} --resume`.")
     info(f"Training finished. Next: voice-clone export {voice.name}")
+
+
+def metrics(voice: Voice) -> list[dict]:
+    """Per-epoch metrics recorded during training (metrics.csv), oldest first. When a run was resumed, the epochs
+    it repeats replace the earlier rows."""
+    path = voice.training_dir / "metrics.csv"
+    if not path.exists():
+        return []
+    rows = {}
+    for line in path.read_text(encoding="utf-8").splitlines()[1:]:
+        parts = line.split(",")
+        if len(parts) < 4 or not parts[0].isdigit():
+            continue
+        rows[int(parts[0])] = {"epoch": int(parts[0]), "val_mel": float(parts[1]) if parts[1] else None,
+                               "seconds": float(parts[2]), "time": float(parts[3])}
+    return [rows[e] for e in sorted(rows)]
+
+
+def eta_seconds(voice: Voice, window: int = 20) -> float | None:
+    """Time left in the current run: remaining epochs × the average duration of the last `window` epochs."""
+    state = read_json(voice.training_dir / "progress.json")
+    rows = metrics(voice)[-(window + 1):]
+    if not state or not rows:
+        return None
+    # Wall time between consecutive epochs also counts checkpoint saving; fall back to the epoch's own duration.
+    durations = [b["time"] - a["time"] for a, b in zip(rows, rows[1:]) if b["epoch"] == a["epoch"] + 1]
+    durations = durations or [r["seconds"] for r in rows]
+    remaining = max(0, state["max_epochs"] - state["epoch"])
+    return remaining * sum(durations) / len(durations)
 
 
 def progress(voice: Voice) -> dict:
