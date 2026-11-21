@@ -15,7 +15,7 @@ from pathlib import Path
 from voice_clone import system
 from voice_clone.installer import piper_ready
 from voice_clone.paths import CACHE_DIR, PIPER_PYTHON
-from voice_clone.util import UserError, info, step, warn
+from voice_clone.util import UserError, info, step, warn, write_json
 from voice_clone.workspace import Voice
 
 HF_TREE = "https://huggingface.co/api/datasets/rhasspy/piper-checkpoints/tree/main/"
@@ -82,7 +82,7 @@ def last_checkpoint(voice: Voice) -> Path | None:
 
 def best_checkpoint(voice: Voice) -> Path | None:
     def val(p: Path) -> float:
-        m = re.search(r"val_mel=([\d.]+)\.ckpt$", p.name)
+        m = re.search(r"val_mel=(\d+\.\d+)\.ckpt$", p.name)
         return float(m.group(1)) if m else float("inf")
 
     found = sorted(voice.training_dir.glob("lightning_logs/version_*/checkpoints/epoch=*.ckpt"), key=val)
@@ -143,6 +143,7 @@ def run(voice: Voice, settings: Settings | None = None) -> None:
     cmd = command(voice, settings)
     step(f"Training {settings.epochs} epochs (follow it with `voice-clone status {voice.name}`)")
     voice.training_dir.mkdir(parents=True, exist_ok=True)
+    write_json(voice.training_dir / "run.json", {"epochs": settings.epochs})
     log_path = voice.training_dir / "train.log"
     info(f"log: {log_path}")
     with open(log_path, "a", encoding="utf-8") as log:
@@ -178,6 +179,6 @@ def progress(voice: Voice) -> dict:
         epoch = int(found[-1]) if found else None
         finished = "`Trainer.fit` stopped" in current_run
     best = best_checkpoint(voice)
-    m = re.search(r"epoch=(\d+)-val_mel=([\d.]+)", best.name) if best else None
+    m = re.search(r"epoch=(\d+)-val_mel=(\d+\.\d+)", best.name) if best else None
     return {"epoch": epoch, "finished": finished, "best_epoch": int(m.group(1)) if m else None,
             "best_val_mel": float(m.group(2)) if m else None, "last": last_checkpoint(voice)}

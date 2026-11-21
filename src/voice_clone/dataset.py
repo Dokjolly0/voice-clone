@@ -194,8 +194,10 @@ def build(voice: Voice, settings: Settings | None = None) -> None:
 
 
 def status(voice: Voice) -> dict:
-    state = voice.load_state()
-    result = counts(state, Settings())
+    result = counts(voice.load_state(), Settings())
+    # Sentences without a state entry yet (dataset never started on them) are still to do.
+    result["total"] = max(result["total"], len(voice.sentences()))
+    result["pending"] = result["total"] - result["verified"] - result["failed"]
     meta = voice.dataset_dir / "metadata.csv"
     result["exported"] = sum(1 for l in meta.read_text(encoding="utf-8").splitlines() if l.strip()) \
         if meta.exists() else 0
