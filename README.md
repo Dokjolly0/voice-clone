@@ -19,6 +19,10 @@ created it.
 4. **Training**: Piper is fine-tuned on that dataset, starting from an existing Piper voice in the same language.
 5. **Export**: the checkpoint becomes `<locale>-<name>-medium.onnx`, which then speaks test sentences.
 
+Once you have a voice (yours, one from Piper's catalog, or any Piper model), the **audio studio** turns text into
+audio files: MP3, WAV, OGG, Opus, FLAC or M4A, with speed, volume, pitch, expressiveness, pauses, a pronunciation
+dictionary, one file per line and a history. See [Audio studio](#audio-studio).
+
 Everything is resumable: stop any stage (Ctrl-C, `voice-clone stop`, a reboot) and run it again to continue where
 it was.
 
@@ -113,6 +117,9 @@ The result is in `voices/anna/export/`, and test sentences are in `voices/anna/s
 | `train NAME [--epochs 2000] [--batch-size N] [--resume]` | fine-tune Piper |
 | `export NAME [--checkpoint last\|best\|PATH] [--sample "text"]` | ONNX export and test sentences (works mid-training) |
 | `say NAME "text" [-o out.wav]` | speak with the exported model |
+| `speak MODEL "text" \| --file F [-o out.mp3] [options]` | generate audio with any studio model (see [Audio studio](#audio-studio)) |
+| `models list \| import F.onnx [F.onnx.json] \| catalog [--lang it] \| download KEY \| remove ID` | the studio's model library and Piper's catalog |
+| `lexicon list \| add \| remove \| test --lang L` | pronunciation dictionary per language |
 | `checkpoints NAME` | list the kept checkpoints and their val_mel |
 | `compare NAME A B` | export two checkpoints (`last`, `best`, an epoch number) with the same test sentences into `export/variants/` |
 | `promote NAME LABEL` | make a compared checkpoint (e.g. `epoch-1816`) the voice's model |
@@ -160,6 +167,43 @@ On a GPU with less memory, training uses a smaller batch size, chosen automatica
 Disk: each checkpoint is about 850 MB. Training keeps the five best by val_mel (across resumed runs) and the latest
 `last.ckpt`, about 5 GB per voice, and deletes older ones before and after every run.
 
+## Audio studio
+
+The web page's **Genera audio** section (switch at the top of the sidebar), and `voice-clone speak` on the command
+line, turn text into audio with any Piper model:
+
+- **Models**:
+  - your trained voices appear by themselves;
+  - **Piper's catalog** (183 official voices in 53 languages, filtered by language and quality) downloads with checksum
+    verification: `voice-clone models catalog --lang it`, then `voice-clone models download it_IT-paola-medium`;
+  - any Piper model (`name.onnx` + `name.onnx.json`, e.g. trained on another machine) can be **imported**.
+- **Settings**:
+  - format MP3 / WAV / OGG / Opus / FLAC / M4A, with bitrate and sample rate;
+  - speed 0.5–2× (approximate: punctuation pauses change less);
+  - volume ±20 dB, loudness normalization to −16 LUFS;
+  - pitch ±12 semitones at the same duration (rubberband; past ±4 it sounds processed);
+  - expressiveness 0–1.5 (Piper's natural variation in intonation and rhythm, not emotions);
+  - speaker, for multi-speaker models.
+- **Pauses**: a blank line separates paragraphs (paragraph pause); line breaks and sentences get the sentence pause;
+  `[pausa 1.5s]`, `[pause 500ms]` or `[break 2s]` add an exact pause anywhere.
+- **Pronunciation dictionary** per language: "written → spoken" rules for acronyms, names and brands, as text
+  (`ACI → A C I`) or Piper phonemes (`Coop → [[ kˈɔp ]]`). Whole words and any case by default; never applied inside
+  `[[ ]]` or pause markers. `voice-clone lexicon add --lang it ACI "A C I"`.
+- **One file per line**: each non-empty line becomes its own file (`001-first-words.mp3`, …), downloaded as a .zip
+  (`--per-line FOLDER` on the command line). Handy for a kiosk's set of messages.
+- **History**: every generation from the web page is kept (the newest 200) with its text, model and settings, to
+  replay, download, reuse or delete.
+
+The studio runs on the CPU with `piper-tts` (onnxruntime) in the app's own environment: no GPU, PyTorch or `setup`
+needed. Measured on a Ryzen 9 7950X3D: 226 s of audio in 4.3 s (~50× real time); a 4-core CPU still runs several
+times faster than real time. Its data lives in `studio/` (`VOICE_CLONE_STUDIO` moves it).
+
+```sh
+./voice-clone speak paola "Benvenuti. [pausa 1s] Il negozio chiude alle diciannove." \
+    --format mp3 --speed 1.1 --pitch -1 --paragraph-pause 1 -o annuncio.mp3
+./voice-clone speak imported:pos --file messaggi.txt --per-line messaggi/ --format wav --sample-rate 44100
+```
+
 ## CPU-only mode
 
 Every stage also runs without a GPU: `./voice-clone setup --device cpu` (chosen automatically when no NVIDIA driver
@@ -201,6 +245,9 @@ voices/<name>/
   samples/              test sentences spoken by the exported model
   logs/                 background job log and pid, speech serve log
 ```
+
+The audio studio keeps its data in `studio/`: `models/` (downloaded and imported models), `lexicon/<lang>.json`,
+`history/` and `preferences.json`.
 
 Shared downloads are cached in `~/.cache/voice-clone` (Common Voice sentences, base checkpoints) and
 `~/.cache/speech.cpp` (models). Set `VOICE_CLONE_VOICES` or `VOICE_CLONE_CACHE` to move them.
@@ -247,3 +294,4 @@ Design notes:
   from [rhasspy/piper-checkpoints](https://huggingface.co/datasets/rhasspy/piper-checkpoints), each with its own
   model card.
 - **Common Voice** sentences are public domain (CC0).
+- **Piper catalog voices** each come with their own license, in the MODEL_CARD downloaded next to the model.
