@@ -50,7 +50,12 @@ class EpochMetrics(Callback):
                     "val_mel": val_mel, "updated": now}
         tmp = root / "progress.json.tmp"
         tmp.write_text(json.dumps(progress), encoding="utf-8")
-        os.replace(tmp, root / "progress.json")
+        for _ in range(20):  # on Windows the replace fails while voice-clone is reading the file; never fatal
+            try:
+                os.replace(tmp, root / "progress.json")
+                break
+            except PermissionError:
+                time.sleep(0.05)
 
 
 def callbacks() -> list:

@@ -62,7 +62,22 @@ def write_json(path: Path, data) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    tmp.replace(path)
+    replace(tmp, path)
+
+
+def replace(src: Path, dst: Path, attempts: int = 20) -> None:
+    """Path.replace, retried briefly: on Windows it fails while another process (the web page polling progress)
+    has the destination open."""
+    import time
+
+    for attempt in range(attempts):
+        try:
+            src.replace(dst)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.05)
 
 
 def download(url: str, dst: Path, md5: str | None = None) -> Path:
