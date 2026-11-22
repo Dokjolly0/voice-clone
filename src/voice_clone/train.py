@@ -162,7 +162,7 @@ def command(voice: Voice, settings: Settings) -> list[str]:
         if settings.init_from:
             if not Path(settings.init_from).is_file():
                 raise UserError(f"checkpoint not found: {settings.init_from}")
-            start = Path(settings.init_from)
+            start = Path(settings.init_from).resolve()  # Piper runs in the training folder
             info(f"starting from {start} instead of the base voice")
         cmd += ["--model.warmstart_ckpt", str(start)]
     return cmd
