@@ -137,9 +137,14 @@ def export(voice: Voice, checkpoint: str = "last") -> Path:
 
 
 def say(voice: Voice, text: str, out: Path) -> Path:
+    """Speak with the voice's exported model through the studio's engine (no training environment needed)."""
     if not voice.onnx_path.exists():
         raise UserError(f"no exported model yet: run `voice-clone export {voice.name}`")
-    return speak(voice.onnx_path, text, out)
+    from voice_clone import models, synthesis
+
+    fmt = out.suffix.lstrip(".").lower()
+    options = synthesis.Options(format=fmt if fmt in synthesis.FORMATS else "wav")
+    return synthesis.generate(models.get(f"voice:{voice.name}"), text, out, options).path
 
 
 def export_and_test(voice: Voice, checkpoint: str = "last", extra: list[str] | None = None) -> None:

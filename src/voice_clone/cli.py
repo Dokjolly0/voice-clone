@@ -236,6 +236,31 @@ def cmd_models(args):
             models.remove(model_id)
 
 
+def speak_options(args):
+    from voice_clone.synthesis import Options
+
+    return Options(speed=args.speed, volume_db=args.volume, pitch=args.pitch, expressiveness=args.expressiveness,
+                   speaker=args.speaker, sentence_pause=args.sentence_pause, paragraph_pause=args.paragraph_pause,
+                   normalize=args.normalize, format=args.format, bitrate=args.bitrate, sample_rate=args.sample_rate)
+
+
+def cmd_speak(args):
+    from voice_clone import models, synthesis
+
+    if (args.text is None) == (args.file is None):
+        raise UserError("give the text, or --file with a text file (not both)")
+    text = args.text if args.text is not None else args.file.read_text(encoding="utf-8")
+    model = models.get(args.model)
+    out = args.output or Path(f"speech.{synthesis.FORMATS[args.format][0]}")
+
+    def report(done, total):
+        if total > 3:
+            print(f"\r{done}/{total}", end="", file=sys.stderr, flush=True)
+
+    result = synthesis.generate(model, text, out, speak_options(args), progress=report)
+    print(f"\n{result.path} ({result.seconds:.1f} s, {result.format}, {result.sample_rate} Hz)", file=sys.stderr)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="voice-clone",
@@ -345,6 +370,14 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("ids", nargs="+")
     p.set_defaults(func=cmd_models)
 
+    p = sub.add_parser("speak", help="generate an audio file from text with any model in the studio's library")
+    p.add_argument("model", help="model id, voice name or path to a .onnx (see `voice-clone models list`)")
+    p.add_argument("text", nargs="?", help="the text; blank lines separate paragraphs, [pausa 1.5s] adds a pause")
+    p.add_argument("--file", type=Path, help="read the text from a file instead")
+    p.add_argument("-o", "--output", type=Path, help="output file (the extension follows --format)")
+    add_speak_args(p)
+    p.set_defaults(func=cmd_speak)
+
     p = sub.add_parser("run", help="every stage in order (reference, dataset, train, export), skipping done ones")
     p.add_argument("name")
     p.add_argument("--max-seconds", type=float, default=30.0, help="longest reference (default 30)")
@@ -382,6 +415,23 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 BACKGROUND_COMMANDS = ("reference", "dataset", "train", "export", "compare", "run")
+
+
+def add_speak_args(p: argparse.ArgumentParser) -> None:
+    from voice_clone.synthesis import FORMATS, SAMPLE_RATES
+
+    p.add_argument("--format", choices=list(FORMATS), default="mp3", help="audio format (default mp3)")
+    p.add_argument("--bitrate", help="for mp3/ogg/opus/m4a, e.g. 128k (defaults: 192k, 160k, 64k, 128k)")
+    p.add_argument("--sample-rate", type=int, choices=SAMPLE_RATES, help="default: the model's own")
+    p.add_argument("--speed", type=float, default=1.0, help="0.5-2.0 (default 1.0)")
+    p.add_argument("--volume", type=float, default=0.0, help="dB, -20..+20 (default 0)")
+    p.add_argument("--pitch", type=float, default=0.0, help="semitones, -12..+12; beyond ±4 it sounds processed")
+    p.add_argument("--expressiveness", type=float, default=1.0,
+                   help="0-1.5 x the model's natural variation in intonation and rhythm (default 1.0)")
+    p.add_argument("--speaker", help="speaker name or number, for multi-speaker models")
+    p.add_argument("--sentence-pause", type=float, default=0.3, help="seconds between sentences and lines (0.3)")
+    p.add_argument("--paragraph-pause", type=float, default=0.8, help="seconds between paragraphs (0.8)")
+    p.add_argument("--normalize", action="store_true", help="normalize loudness to -16 LUFS")
 
 
 def add_export_args(p: argparse.ArgumentParser) -> None:
