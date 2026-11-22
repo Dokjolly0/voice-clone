@@ -1,5 +1,6 @@
 """Small helpers shared by every stage: messages, subprocesses, atomic JSON."""
 
+import hashlib
 import json
 import os
 import shlex
@@ -60,3 +61,23 @@ def write_json(path: Path, data) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     tmp.replace(path)
+
+
+def download(url: str, dst: Path, md5: str | None = None) -> Path:
+    """Download to dst through a .part file (an interrupted download never looks complete), checking md5 if given."""
+    import urllib.request
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_name(dst.name + ".part")
+    info(f"downloading {url}")
+    digest = hashlib.md5()
+    req = urllib.request.Request(url, headers={"User-Agent": "voice-clone"})
+    with urllib.request.urlopen(req, timeout=300) as r, open(tmp, "wb") as f:
+        while chunk := r.read(1 << 22):
+            f.write(chunk)
+            digest.update(chunk)
+    if md5 and digest.hexdigest() != md5:
+        tmp.unlink()
+        raise UserError(f"download of {dst.name} is corrupted (checksum mismatch); try again")
+    tmp.replace(dst)
+    return dst

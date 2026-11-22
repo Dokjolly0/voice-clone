@@ -12,3 +12,6 @@ voices/
 
 # Machine settings written by `voice-clone setup`
 settings.json
+
+# Audio studio: imported and downloaded models, dictionaries, generation history
+studio/

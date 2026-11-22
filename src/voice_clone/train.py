@@ -17,7 +17,7 @@ from voice_clone import settings as settings_module
 from voice_clone import system
 from voice_clone.installer import piper_ready
 from voice_clone.paths import CACHE_DIR, PIPER_PYTHON
-from voice_clone.util import UserError, info, read_json, step, warn, write_json
+from voice_clone.util import UserError, download, info, read_json, step, warn, write_json
 from voice_clone.workspace import Voice
 
 HF_TREE = "https://huggingface.co/api/datasets/rhasspy/piper-checkpoints/tree/main/"
@@ -52,16 +52,6 @@ def batch_for_cpu(ram_gib: float) -> int:
     return 32 if ram_gib >= 24 else 16
 
 
-def _download(url: str, dst: Path) -> None:
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dst.with_suffix(dst.suffix + ".part")
-    info(f"downloading {url}")
-    with urllib.request.urlopen(url, timeout=300) as r, open(tmp, "wb") as f:
-        while chunk := r.read(1 << 22):
-            f.write(chunk)
-    tmp.replace(dst)
-
-
 def base_checkpoint(voice: Voice) -> tuple[Path, dict]:
     """The language's base checkpoint and its config.json, downloaded once into the cache."""
     folder = voice.language.checkpoint
@@ -75,8 +65,8 @@ def base_checkpoint(voice: Voice) -> tuple[Path, dict]:
         ckpt_names = [n for n in names if n.endswith(".ckpt")]
         if not ckpt_names or "config.json" not in names:
             raise UserError(f"no checkpoint found in rhasspy/piper-checkpoints/{folder}")
-        _download(HF_FILE + urllib.parse.quote(f"{folder}/config.json"), config_path)
-        _download(HF_FILE + urllib.parse.quote(f"{folder}/{ckpt_names[0]}"), cache / ckpt_names[0])
+        download(HF_FILE + urllib.parse.quote(f"{folder}/config.json"), config_path)
+        download(HF_FILE + urllib.parse.quote(f"{folder}/{ckpt_names[0]}"), cache / ckpt_names[0])
         ckpts = [cache / ckpt_names[0]]
     return ckpts[0], json.loads(config_path.read_text())
 

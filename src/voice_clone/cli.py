@@ -209,6 +209,33 @@ def cmd_web(args):
     web.serve(host=args.host, port=args.port, share=args.share)
 
 
+def cmd_models(args):
+    from voice_clone import models
+
+    if args.action == "list":
+        found = models.list_models()
+        if not found:
+            print("No models yet: train a voice, `voice-clone models catalog --lang it`, or `models import`.")
+        for m in found:
+            speakers = f", {len(m.speakers)} speakers" if m.speakers else ""
+            print(f"{m.id:40} {m.language:6} {m.quality:7} {models.ORIGIN_LABELS[m.origin]}{speakers}")
+    elif args.action == "import":
+        models.import_files(args.files[0], args.files[1] if len(args.files) > 1 else None, name=args.name)
+    elif args.action == "catalog":
+        rows = models.search(args.lang, args.quality)
+        for r in rows:
+            mark = "installed" if r["installed"] else ""
+            print(f"{r['key']:36} {r['language_name']:12} {r['quality']:7} {r['speakers']:>4} spk "
+                  f"{r['size_mb']:>4} MB  {mark}")
+        print(f"{len(rows)} voices" + ("" if args.lang else "; filter with --lang it"))
+    elif args.action == "download":
+        for key in args.keys:
+            models.download_catalog(key)
+    elif args.action == "remove":
+        for model_id in args.ids:
+            models.remove(model_id)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="voice-clone",
@@ -302,6 +329,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name")
     p.add_argument("label")
     p.set_defaults(func=cmd_promote)
+
+    p = sub.add_parser("models", help="the studio's models: list, import, browse and download Piper's catalog")
+    msub = p.add_subparsers(dest="action", required=True, metavar="<action>")
+    msub.add_parser("list", help="every model the studio can use")
+    q = msub.add_parser("import", help="add a Piper model: FILE.onnx [FILE.onnx.json]")
+    q.add_argument("files", nargs="+", type=Path)
+    q.add_argument("--name", help="name in the library (default: the file name)")
+    q = msub.add_parser("catalog", help="browse Piper's official voices")
+    q.add_argument("--lang", help="language, e.g. it or it_IT")
+    q.add_argument("--quality", choices=["x_low", "low", "medium", "high"])
+    q = msub.add_parser("download", help="download voices from the catalog by key, e.g. it_IT-paola-medium")
+    q.add_argument("keys", nargs="+")
+    q = msub.add_parser("remove", help="remove downloaded or imported models by id")
+    q.add_argument("ids", nargs="+")
+    p.set_defaults(func=cmd_models)
 
     p = sub.add_parser("run", help="every stage in order (reference, dataset, train, export), skipping done ones")
     p.add_argument("name")

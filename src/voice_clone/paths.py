@@ -1,4 +1,5 @@
-"""Where everything lives. Override the voices folder with VOICE_CLONE_VOICES and the cache with VOICE_CLONE_CACHE."""
+"""Where everything lives. Override with VOICE_CLONE_VOICES (voices), VOICE_CLONE_STUDIO (studio data: models,
+dictionaries, history) and VOICE_CLONE_CACHE (downloads)."""
 
 import os
 from pathlib import Path
@@ -6,6 +7,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 VOICES_DIR = Path(os.environ.get("VOICE_CLONE_VOICES", PROJECT_ROOT / "voices"))
 CACHE_DIR = Path(os.environ.get("VOICE_CLONE_CACHE", Path.home() / ".cache" / "voice-clone"))
+STUDIO_DIR = Path(os.environ.get("VOICE_CLONE_STUDIO", PROJECT_ROOT / "studio"))
 
 THIRD_PARTY_DIR = PROJECT_ROOT / "third_party"
 PIPER_DIR = THIRD_PARTY_DIR / "piper1-gpl"
