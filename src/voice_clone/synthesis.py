@@ -52,6 +52,7 @@ class Options:
     format: str = "mp3"
     bitrate: str | None = None      # e.g. "192k"; default per format
     sample_rate: int | None = None  # None: the model's own
+    use_lexicon: bool = True        # apply the pronunciation dictionary of the model's language
 
     def validate(self) -> "Options":
         if self.format not in FORMATS:
@@ -162,6 +163,10 @@ def synthesis_config(model: Model, options: Options):
 def render(model: Model, text: str, options: Options,
            progress: Callable[[int, int], None] | None = None) -> np.ndarray:
     """Speak the text into one int16 array at the model's sample rate, pauses included."""
+    if options.use_lexicon:
+        from voice_clone import lexicon
+
+        text = lexicon.apply(text, model.language_family)
     items = parse(text)
     total = sum(1 for kind, _ in items if kind == "speak")
     if not total:

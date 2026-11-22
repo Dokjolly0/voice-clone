@@ -241,7 +241,8 @@ def speak_options(args):
 
     return Options(speed=args.speed, volume_db=args.volume, pitch=args.pitch, expressiveness=args.expressiveness,
                    speaker=args.speaker, sentence_pause=args.sentence_pause, paragraph_pause=args.paragraph_pause,
-                   normalize=args.normalize, format=args.format, bitrate=args.bitrate, sample_rate=args.sample_rate)
+                   normalize=args.normalize, format=args.format, bitrate=args.bitrate, sample_rate=args.sample_rate,
+                   use_lexicon=args.use_lexicon)
 
 
 def cmd_speak(args):
@@ -259,6 +260,26 @@ def cmd_speak(args):
 
     result = synthesis.generate(model, text, out, speak_options(args), progress=report)
     print(f"\n{result.path} ({result.seconds:.1f} s, {result.format}, {result.sample_rate} Hz)", file=sys.stderr)
+
+
+def cmd_lexicon(args):
+    from voice_clone import lexicon
+
+    if args.action == "list":
+        found = lexicon.rules(args.lang)
+        if not found:
+            print(f"No rules for {args.lang} yet: voice-clone lexicon add --lang {args.lang} WRITTEN SPOKEN")
+        for r in sorted(found, key=lambda r: r["written"].lower()):
+            flags = ", ".join(f for f, on in (("anywhere in words", not r.get("whole_word", True)),
+                                              ("case-sensitive", r.get("match_case"))) if on)
+            print(f"{r['written']!r:28} → {r['spoken']!r}" + (f"   ({flags})" if flags else ""))
+    elif args.action == "add":
+        lexicon.add(args.lang, args.written, args.spoken, whole_word=not args.anywhere, match_case=args.match_case)
+        print(f"{args.written!r} → {args.spoken!r}")
+    elif args.action == "remove":
+        lexicon.remove(args.lang, args.written)
+    elif args.action == "test":
+        print(lexicon.apply(args.text, args.lang))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -378,6 +399,22 @@ def build_parser() -> argparse.ArgumentParser:
     add_speak_args(p)
     p.set_defaults(func=cmd_speak)
 
+    p = sub.add_parser("lexicon", help="pronunciation dictionary per language: how to say acronyms, names, brands")
+    lsub = p.add_subparsers(dest="action", required=True, metavar="<action>")
+    for name, text in (("list", "show the rules"), ("add", "add or replace a rule"), ("remove", "remove a rule"),
+                       ("test", "show how a text will be read")):
+        q = lsub.add_parser(name, help=text)
+        q.add_argument("--lang", required=True, help="language code, e.g. it")
+        if name in ("add", "remove"):
+            q.add_argument("written", help="the text as written, e.g. ACI")
+        if name == "add":
+            q.add_argument("spoken", help="how to say it, e.g. 'A C I' or Piper phonemes '[[ a tʃˈi ]]'")
+            q.add_argument("--anywhere", action="store_true", help="also inside longer words")
+            q.add_argument("--match-case", action="store_true", help="only with exactly this capitalization")
+        if name == "test":
+            q.add_argument("text")
+    p.set_defaults(func=cmd_lexicon)
+
     p = sub.add_parser("run", help="every stage in order (reference, dataset, train, export), skipping done ones")
     p.add_argument("name")
     p.add_argument("--max-seconds", type=float, default=30.0, help="longest reference (default 30)")
@@ -432,6 +469,8 @@ def add_speak_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--sentence-pause", type=float, default=0.3, help="seconds between sentences and lines (0.3)")
     p.add_argument("--paragraph-pause", type=float, default=0.8, help="seconds between paragraphs (0.8)")
     p.add_argument("--normalize", action="store_true", help="normalize loudness to -16 LUFS")
+    p.add_argument("--no-lexicon", dest="use_lexicon", action="store_false",
+                   help="ignore the pronunciation dictionary")
 
 
 def add_export_args(p: argparse.ArgumentParser) -> None:
