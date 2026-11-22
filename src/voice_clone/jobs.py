@@ -1,7 +1,11 @@
 """Background jobs: one voice-clone command per voice, detached from the terminal (and from the web UI).
 
-The job runs in its own session, so closing the terminal or the browser does not stop it. Its output goes to
-voices/<name>/logs/job.log and its pid to logs/job.json.
+The job runs in its own session (Linux) or process group without a console window (Windows), so closing the
+terminal or the browser does not stop it. Its output goes to voices/<name>/logs/job.log and its pid to logs/job.json.
+
+Stopping is clean on both systems: on Linux the job's process group gets SIGINT, like Ctrl-C. Windows cannot send
+Ctrl-C to a process on another console, so `stop` leaves a stop.request file in the logs folder; the job watches for
+it and interrupts itself and its children with Ctrl-Break, which voice-clone turns into the same KeyboardInterrupt.
 """
 
 import os
@@ -9,53 +13,88 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
+from pathlib import Path
 
+import psutil
+
+from voice_clone import host
 from voice_clone.util import UserError, read_json, write_json
 from voice_clone.workspace import Voice
 
+JOB_ENV = "VOICE_CLONE_JOB_LOGS"  # set in a job's environment: the logs folder where stop.request appears
+STOP_REQUEST = "stop.request"
 
-def _alive(pid: int) -> bool:
+
+def _process(pid: int, created: float | None = None) -> psutil.Process | None:
+    """The running process with this pid; None if it exited, is a zombie, or the pid now belongs to another
+    process (its start time differs from the job's)."""
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    # A zombie still answers kill(0); check its state.
-    try:
-        with open(f"/proc/{pid}/stat") as f:
-            return f.read().split(")")[-1].split()[0] != "Z"
-    except OSError:
-        return False
+        proc = psutil.Process(pid)
+        if created and abs(proc.create_time() - created) > 2:
+            return None
+        if proc.status() == psutil.STATUS_ZOMBIE:
+            return None
+        return proc
+    except psutil.NoSuchProcess:
+        return None
+    except psutil.AccessDenied:
+        return psutil.Process(pid) if psutil.pid_exists(pid) else None
+
+
+def _alive(pid: int, created: float | None = None) -> bool:
+    return _process(pid, created) is not None
 
 
 def current(voice: Voice) -> dict | None:
     """The running job, or None."""
     job = read_json(voice.logs_dir / "job.json")
-    if job and job.get("pid") and _alive(job["pid"]):
+    if job and job.get("pid") and _alive(job["pid"], job.get("created")):
         return job
     return None
 
 
-def start(voice: Voice, args: list[str]) -> dict:
+def _popen_options() -> dict:
+    if host.IS_WINDOWS:
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
+    return {"start_new_session": True}
+
+
+def start(voice: Voice, args: list[str], command: list[str] | None = None) -> dict:
+    """Start `voice-clone ARGS` (or, for tests, another command) as the voice's background job."""
     running = current(voice)
     if running:
         raise UserError(f"{voice.name} is already running `{' '.join(running['args'])}` (pid {running['pid']}); "
                         f"stop it with `voice-clone stop {voice.name}`")
     voice.logs_dir.mkdir(parents=True, exist_ok=True)
+    (voice.logs_dir / STOP_REQUEST).unlink(missing_ok=True)
     log_path = voice.logs_dir / "job.log"
     if log_path.exists():
         log_path.replace(voice.logs_dir / "job.previous.log")
-    log = open(log_path, "wb")
-    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
-    proc = subprocess.Popen([sys.executable, "-m", "voice_clone", *args], stdin=subprocess.DEVNULL, stdout=log,
-                            stderr=subprocess.STDOUT, start_new_session=True, env=env)
-    job = {"pid": proc.pid, "args": args, "started": datetime.now().isoformat(timespec="seconds"),
+    env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONUTF8": "1", JOB_ENV: str(voice.logs_dir)}
+    with open(log_path, "wb") as log:
+        proc = subprocess.Popen(command or [sys.executable, "-m", "voice_clone", *args], stdin=subprocess.DEVNULL, stdout=log,
+                                stderr=subprocess.STDOUT, env=env, **_popen_options())
+    try:
+        created = psutil.Process(proc.pid).create_time()
+    except psutil.Error:
+        created = None
+    job = {"pid": proc.pid, "created": created, "args": args, "started": datetime.now().isoformat(timespec="seconds"),
            "log": str(log_path)}
     write_json(voice.logs_dir / "job.json", job)
     return job
+
+
+def _tree(pid: int, created: float | None) -> list[psutil.Process]:
+    proc = _process(pid, created)
+    if not proc:
+        return []
+    try:
+        return [proc, *proc.children(recursive=True)]
+    except psutil.Error:
+        return [proc]
 
 
 def stop(voice: Voice, timeout: float = 60) -> bool:
@@ -63,7 +102,10 @@ def stop(voice: Voice, timeout: float = 60) -> bool:
     job = current(voice)
     if not job:
         return False
-    pgid = os.getpgid(job["pid"])
+    pid, created = job["pid"], job.get("created")
+    if host.IS_WINDOWS:
+        return _stop_windows(voice, pid, created, timeout)
+    pgid = os.getpgid(pid)
     for sig, wait in ((signal.SIGINT, timeout), (signal.SIGTERM, 15), (signal.SIGKILL, 5)):
         try:
             os.killpg(pgid, sig)
@@ -71,10 +113,55 @@ def stop(voice: Voice, timeout: float = 60) -> bool:
             return True
         deadline = time.time() + wait
         while time.time() < deadline:
-            if not _alive(job["pid"]):
+            if not _alive(pid, created):
                 return True
             time.sleep(0.5)
-    return not _alive(job["pid"])
+    return not _alive(pid, created)
+
+
+def _stop_windows(voice: Voice, pid: int, created: float | None, timeout: float) -> bool:
+    tree = _tree(pid, created)
+    (voice.logs_dir / STOP_REQUEST).write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not _alive(pid, created):
+            break
+        time.sleep(0.5)
+    tree += [p for p in _tree(pid, created) if p not in tree]
+    remaining = [p for p in tree if p.is_running()]
+    for action, wait in (("terminate", 15), ("kill", 5)):
+        if not remaining:
+            break
+        for p in remaining:
+            try:
+                getattr(p, action)()
+            except psutil.Error:
+                pass
+        _, remaining = psutil.wait_procs(remaining, timeout=wait)
+    (voice.logs_dir / STOP_REQUEST).unlink(missing_ok=True)
+    return not _alive(pid, created)
+
+
+def watch_stop_request() -> None:
+    """In a Windows job: interrupt this process group (Ctrl-Break) when `stop` leaves a stop.request file."""
+    logs = os.environ.get(JOB_ENV)
+    if not (host.IS_WINDOWS and logs):
+        return
+    import ctypes
+
+    request = Path(logs) / STOP_REQUEST
+
+    def watch():
+        while True:
+            if request.exists():
+                request.unlink(missing_ok=True)
+                # Group 0: every process on this job's own (hidden) console, i.e. the job and its children. The
+                # job's pid may be the venv launcher's, so the group is not addressed by pid.
+                ctypes.windll.kernel32.GenerateConsoleCtrlEvent(signal.CTRL_BREAK_EVENT, 0)
+                return
+            time.sleep(1)
+
+    threading.Thread(target=watch, daemon=True, name="stop-request").start()
 
 
 def log_tail(voice: Voice, max_bytes: int = 20000) -> str:

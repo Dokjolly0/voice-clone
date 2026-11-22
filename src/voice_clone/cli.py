@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import signal
 import sys
 from pathlib import Path
 
@@ -532,8 +533,22 @@ def _utf8_io() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")
 
 
+def _interrupt(signum, frame):
+    raise KeyboardInterrupt
+
+
+def interruptible() -> None:
+    """On Windows, Ctrl-Break (how `stop` interrupts a background job) works like Ctrl-C."""
+    if hasattr(signal, "SIGBREAK"):
+        from voice_clone import jobs
+
+        signal.signal(signal.SIGBREAK, _interrupt)
+        jobs.watch_stop_request()
+
+
 def main(argv: list[str] | None = None) -> None:
     _utf8_io()
+    interruptible()
     parser = build_parser()
     argv = sys.argv[1:] if argv is None else argv
     args = parser.parse_args(argv)
