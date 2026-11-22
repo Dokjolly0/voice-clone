@@ -15,8 +15,10 @@ def voice(voices_dir):
 
 # A stand-in for a long stage: prints, then waits until interrupted, which it reports like voice-clone does.
 JOB = """
-import sys, time
-from voice_clone import cli
+import os, sys, time
+from voice_clone import cli, host
+if os.environ.get("SIMULATE_WINDOWS"):
+    host.IS_WINDOWS = True
 cli.interruptible()
 print("working", flush=True)
 try:
@@ -41,8 +43,25 @@ def test_background_job_runs_detached_and_stops_cleanly(voice):
     assert job["created"]
     assert jobs.current(voice)["pid"] == job["pid"]
     assert wait_for(lambda: "working" in jobs.log_tail(voice))
+    started = time.time()
     assert jobs.stop(voice, timeout=20)
+    assert time.time() - started < 10  # interrupted, not killed at the timeout
     assert jobs.current(voice) is None
+    assert jobs.progress(voice)["error"] == "interrupted"
+    assert not (voice.logs_dir / jobs.STOP_REQUEST).exists()
+
+
+def test_windows_stop_request_interrupts_the_job(voice, monkeypatch):
+    """The Windows way of stopping (a stop.request file the job watches), simulated on Linux too."""
+    monkeypatch.setenv("SIMULATE_WINDOWS", "1")
+    if sys.platform != "win32":
+        monkeypatch.setattr(jobs, "_popen_options", lambda: {"start_new_session": True})
+    monkeypatch.setattr(jobs.host, "IS_WINDOWS", True)
+    jobs.start(voice, ["dataset", voice.name], command=[sys.executable, "-c", JOB])
+    assert wait_for(lambda: "working" in jobs.log_tail(voice))
+    started = time.time()
+    assert jobs.stop(voice, timeout=20)
+    assert time.time() - started < 10  # interrupted, not killed at the timeout
     assert jobs.progress(voice)["error"] == "interrupted"
     assert not (voice.logs_dir / jobs.STOP_REQUEST).exists()
 

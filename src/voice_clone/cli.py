@@ -538,12 +538,12 @@ def _interrupt(signum, frame):
 
 
 def interruptible() -> None:
-    """On Windows, Ctrl-Break (how `stop` interrupts a background job) works like Ctrl-C."""
-    if hasattr(signal, "SIGBREAK"):
-        from voice_clone import jobs
+    """On Windows: Ctrl-Break works like Ctrl-C, and a background job stops cleanly when `stop` asks it to."""
+    from voice_clone import jobs
 
+    if hasattr(signal, "SIGBREAK"):
         signal.signal(signal.SIGBREAK, _interrupt)
-        jobs.watch_stop_request()
+    jobs.watch_stop_request()
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -13,8 +13,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from voice_clone import host, system
 from voice_clone import settings as settings_module
-from voice_clone import system
 from voice_clone.installer import piper_ready
 from voice_clone.paths import CACHE_DIR, PIPER_PYTHON
 from voice_clone.util import UserError, download, info, read_json, step, warn, write_json
@@ -191,6 +191,12 @@ def run(voice: Voice, settings: Settings | None = None) -> None:
                 log.write(text)
                 log.flush()
                 print(text, end="", flush=True)
+        except KeyboardInterrupt:
+            # On Linux Piper got the same Ctrl-C (one process group) and stops by itself. On Windows a job's stop
+            # interrupts only this process: end Piper here; last.ckpt of the previous epoch is kept for --resume.
+            if host.IS_WINDOWS:
+                proc.terminate()
+            raise
         finally:
             code = proc.wait()
     prune_checkpoints(voice)

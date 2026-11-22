@@ -5,7 +5,8 @@ terminal or the browser does not stop it. Its output goes to voices/<name>/logs/
 
 Stopping is clean on both systems: on Linux the job's process group gets SIGINT, like Ctrl-C. Windows cannot send
 Ctrl-C to a process on another console, so `stop` leaves a stop.request file in the logs folder; the job watches for
-it and interrupts itself and its children with Ctrl-Break, which voice-clone turns into the same KeyboardInterrupt.
+it and interrupts itself with the same KeyboardInterrupt. Whatever is still running after the timeout is terminated
+with its children.
 """
 
 import os
@@ -143,21 +144,25 @@ def _stop_windows(voice: Voice, pid: int, created: float | None, timeout: float)
 
 
 def watch_stop_request() -> None:
-    """In a Windows job: interrupt this process group (Ctrl-Break) when `stop` leaves a stop.request file."""
+    """In a Windows job: interrupt this process, like Ctrl-C, when `stop` leaves a stop.request file.
+
+    raise_signal(SIGINT) runs Python's own Ctrl-C handling inside this process: it needs no console (a job has
+    none) and, unlike a console Ctrl-Break, it also wakes the main thread from sleeps and waits. Child processes
+    (Piper's training, speech serve) are stopped by the code that started them as the interruption unwinds.
+    """
     logs = os.environ.get(JOB_ENV)
     if not (host.IS_WINDOWS and logs):
         return
-    import ctypes
-
     request = Path(logs) / STOP_REQUEST
 
     def watch():
         while True:
             if request.exists():
                 request.unlink(missing_ok=True)
-                # Group 0: every process on this job's own (hidden) console, i.e. the job and its children. The
-                # job's pid may be the venv launcher's, so the group is not addressed by pid.
-                ctypes.windll.kernel32.GenerateConsoleCtrlEvent(signal.CTRL_BREAK_EVENT, 0)
+                if hasattr(signal, "pthread_kill"):  # POSIX (tests simulate Windows): to the main thread
+                    signal.pthread_kill(threading.main_thread().ident, signal.SIGINT)
+                else:
+                    signal.raise_signal(signal.SIGINT)
                 return
             time.sleep(1)
 
