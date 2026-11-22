@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: "1"
+      VOICE_CLONE_STUDIO: ${{ github.workspace }}/ci-studio
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
+
+      - name: Install FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Check the lock file
+        run: uv lock --check
+
+      - name: Unit tests
+        run: uv run pytest -v
+
+      - name: Launcher, help and doctor (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ./voice-clone --help
+          ./voice-clone doctor
+          ./voice-clone languages
+
+      - name: Launcher, help and doctor (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call voice-clone.cmd --help || exit /b 1
+          call voice-clone.cmd doctor || exit /b 1
+          call voice-clone.cmd languages || exit /b 1
+
+      # The studio end to end: download a voice from Piper's catalog (checksum verified), synthesize, inspect.
+      # GPU, dataset generation and training need an NVIDIA GPU and ~25 GB of models: not available on runners.
+      - name: Studio synthesis
+        shell: bash
+        run: |
+          vc() { uv run voice-clone "$@"; }
+          vc models download it_IT-paola-medium
+          vc models list
+          vc speak it_IT-paola-medium "Ciao, questa è una prova. Perché no?" --format mp3 -o out/prova
+          vc speak it_IT-paola-medium "Seconda prova, più lenta." --format wav --speed 0.8 -o out/lenta
+          printf 'Buongiorno!\nGrazie mille.\n' > righe.txt
+          vc speak it_IT-paola-medium --file righe.txt --per-line out/righe --format ogg
+          for f in out/prova.mp3 out/lenta.wav out/righe/*.ogg; do
+            ffprobe -v error -show_entries format=duration:stream=codec_name,sample_rate -of compact "$f"
+          done
+          test "$(ls out/righe/*.ogg | wc -l)" -eq 2
