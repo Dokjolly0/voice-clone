@@ -45,3 +45,20 @@ def test_redo_short_resets_only_single_take_short_sentences(voices_dir):
     assert not state["clips"]["00000"].get("verified") and state["clips"]["00000"]["attempts"] == 0
     assert not (voice.clips_dir / "00000.wav").exists()
     assert state["clips"]["00001"]["verified"] and state["clips"]["00002"]["verified"]
+
+
+def test_redo_short_also_retries_far_takes_with_attempts_left(voices_dir):
+    from voice_clone import workspace
+
+    voice = workspace.create("v", "it")
+    voice.clips_dir.mkdir(parents=True)
+    state = {"clips": {
+        "00000": {"text": "Ciao!", "attempts": 1, "verified": True, "best_of": 5, "prosody": {"distance": 4.5}},
+        "00001": {"text": "Certo!", "attempts": 4, "verified": True, "best_of": 5, "prosody": {"distance": 5.0}},
+        "00002": {"text": "Prego.", "attempts": 1, "verified": True, "best_of": 5, "prosody": {"distance": 1.0}},
+    }}
+    for cid in state["clips"]:
+        (voice.clips_dir / f"{cid}.wav").write_bytes(b"x")
+    assert dataset.redo_short(voice, state, dataset.Settings(short_best_of=5, max_distance=3.0)) == 1
+    assert not state["clips"]["00000"].get("verified") and state["clips"]["00000"]["attempts"] == 1  # new seeds
+    assert state["clips"]["00001"]["verified"] and state["clips"]["00002"]["verified"]

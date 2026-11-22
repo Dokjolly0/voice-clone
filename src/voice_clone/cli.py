@@ -86,7 +86,8 @@ def dataset_settings(args):
     from voice_clone.dataset import Settings
 
     return Settings(max_attempts=args.max_attempts, max_cer=args.max_cer, limit=args.limit,
-                    short_best_of=args.short_best_of, redo_short=getattr(args, "redo_short", False))
+                    short_best_of=args.short_best_of, redo_short=getattr(args, "redo_short", False),
+                    max_distance=args.max_distance)
 
 
 def cmd_dataset(args):
@@ -507,8 +508,11 @@ def add_dataset_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--short-best-of", type=int, default=5, metavar="N",
                    help="takes per short sentence; the one closest to the voice's usual pitch and rate is kept "
                         "(default 5, 1 = off)")
+    p.add_argument("--max-distance", type=float, default=3.0,
+                   help="a short sentence whose best take is farther than this from the voice's usual pitch and "
+                        "rate is tried again with new takes (default 3; the last attempt keeps the best)")
     p.add_argument("--redo-short", action="store_true",
-                   help="regenerate short sentences that were made with a single take")
+                   help="regenerate short sentences made with a single take, or whose take is far from the voice")
 
 
 def add_sentence_args(p: argparse.ArgumentParser) -> None:

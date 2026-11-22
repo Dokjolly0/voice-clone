@@ -31,6 +31,7 @@ class Settings:
     max_seconds: float = 30.0  # a sentence that speaks longer than this is a runaway generation
     limit: int = 0             # generate at most this many clips per round (0: all), for quick tests
     short_best_of: int = 5     # takes per short sentence, the most typical one is kept (1: off)
+    max_distance: float = 3.0  # a best take farther than this from the voice's prosody is tried again
     redo_short: bool = False   # regenerate verified short sentences that were made with a single take
 
 
@@ -173,10 +174,17 @@ def choose_takes(voice: Voice, state: dict, cids: list[str], settings: Settings)
     for cid in cids:
         entry = state["clips"][cid]
         candidates = passing[cid]
+        def far(t):
+            return prosody.distance(measured.get(str(t), {}), entry["text"], profile) if profile else 0
+
+        best = min(candidates, key=far) if candidates else None
+        if best is not None and far(best) > settings.max_distance and entry["attempts"] < settings.max_attempts:
+            entry["rejected"] = f"best take too far from the voice's prosody (distance {far(best):.1f})"
+            for t in takes_of(voice, cid):
+                t.unlink()
+            bad += 1
+            continue
         if candidates:
-            scored = sorted(candidates, key=lambda t: prosody.distance(measured.get(str(t), {}), entry["text"], profile)
-                            if profile else 0)
-            best = scored[0]
             shutil.move(best, voice.clips_dir / f"{cid}.wav")
             entry.update(verified=True, best_of=settings.short_best_of, heard=texts.get(str(best), ""),
                          cer=round(cer(entry["text"], texts.get(str(best), "")), 3), seed=int(best.stem.split("-")[1]))
@@ -192,7 +200,8 @@ def choose_takes(voice: Voice, state: dict, cids: list[str], settings: Settings)
         for t in takes_of(voice, cid):
             t.unlink()
     voice.save_state(state)
-    info(f"short sentences: {good} kept their best take, {bad} had no good take (generated again)")
+    info(f"short sentences: {good} kept their best take, {bad} had no good or typical enough take "
+         "(generated again, until the last attempt keeps the best)")
     return good, bad
 
 
@@ -262,16 +271,22 @@ def export(voice: Voice, state: dict) -> tuple[int, float]:
 
 def redo_short(voice: Voice, state: dict, settings: Settings) -> int:
     """Send verified short sentences made with a single take back to generation, to get their best take."""
-    redo = [cid for cid, e in state["clips"].items()
-            if e.get("verified") and is_short(voice, e["text"]) and e.get("best_of", 1) < settings.short_best_of]
-    for cid in redo:
+    single = [cid for cid, e in state["clips"].items()
+              if e.get("verified") and is_short(voice, e["text"]) and e.get("best_of", 1) < settings.short_best_of]
+    # Best takes that stayed far from the voice and still have attempts left: new seeds (the attempt goes on).
+    far = [cid for cid, e in state["clips"].items()
+           if e.get("verified") and cid not in single and e.get("prosody", {}).get("distance", 0) > settings.max_distance
+           and e["attempts"] < settings.max_attempts]
+    for cid in single + far:
         entry = state["clips"][cid]
         (voice.clips_dir / f"{cid}.wav").unlink(missing_ok=True)
         entry.pop("verified", None)
-        entry["attempts"] = 0
+        if cid in single:
+            entry["attempts"] = 0  # take 0 of attempt 0 reproduces the original clip, so it competes too
     voice.save_state(state)
-    info(f"{len(redo)} short sentences will be generated again, keeping the best of {settings.short_best_of} takes")
-    return len(redo)
+    info(f"{len(single) + len(far)} short sentences will be generated again ({len(single)} single takes, "
+         f"{len(far)} far from the voice), keeping the best of {settings.short_best_of} takes")
+    return len(single) + len(far)
 
 
 def build(voice: Voice, settings: Settings | None = None) -> None:
