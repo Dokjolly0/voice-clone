@@ -17,7 +17,8 @@ from pathlib import Path
 import gradio as gr
 import pandas as pd
 
-from voice_clone import audio, dataset, export, jobs, languages, pipeline, reference, settings, train, workspace
+from voice_clone import (audio, dataset, export, jobs, languages, pipeline, reference, settings, train, web_studio,
+                         workspace)
 from voice_clone.util import UserError, read_json
 
 SAMPLE_SLOTS = 5
@@ -493,141 +494,150 @@ def build() -> gr.Blocks:
         with gr.Sidebar(open=True):
             gr.Markdown("## 🎙️ voice-clone")
             gr.Markdown(device_label(), elem_classes="vc-muted")
-            voice_radio = gr.Radio(choices=names, value=names[0] if names else None, label="Voci")
-            new_btn = gr.Button("＋ Nuova voce", size="sm")
-            gr.Markdown("**Passi**")
-            step_btns = [gr.Button(f"🔒  {i + 1} · {t}", elem_classes="vc-step-btn", size="sm", interactive=False)
-                         for i, t in enumerate(STEP_TITLES)]
+            mode = gr.Radio([("🛠️  Crea una voce", "create"), ("🔊  Genera audio", "studio")], value="create",
+                            show_label=False, container=False)
+            with gr.Column() as create_side:
+                voice_radio = gr.Radio(choices=names, value=names[0] if names else None, label="Voci")
+                new_btn = gr.Button("＋ Nuova voce", size="sm")
+                gr.Markdown("**Passi**")
+                step_btns = [gr.Button(f"🔒  {i + 1} · {t}", elem_classes="vc-step-btn", size="sm", interactive=False)
+                             for i, t in enumerate(STEP_TITLES)]
+            with gr.Column(visible=False) as studio_side:
+                gr.Markdown("**Suggerimenti**\n\n- Riga vuota = nuovo paragrafo\n- `[pausa 1.5s]` = pausa precisa\n"
+                            "- `[[ fonemi ]]` = pronuncia esatta\n- Le sigle si sistemano nella scheda **Pronuncia**")
 
-        # --- welcome / new voice -----------------------------------------------------------------------------
-        with gr.Column(visible=not names) as welcome:
-            gr.Markdown("# Benvenuto\nCon **voice-clone** trasformi poche registrazioni di una voce in un modello "
-                        "Piper leggero, che parla in tempo reale anche senza GPU.\n\n"
-                        "1. **Audio**: carichi le registrazioni\n2. **Riferimento**: controlli la trascrizione\n"
-                        "3. **Dataset**: Drama 3 legge un migliaio di frasi con quella voce\n"
-                        "4. **Addestramento**: Piper impara la voce (qualche ora)\n"
-                        "5. **Esporta e prova**: ascolti il risultato e scarichi il modello\n\n"
-                        "Per iniziare: **＋ Nuova voce** nella barra a sinistra.")
-        with gr.Column(visible=False) as new_panel:
-            gr.Markdown("# Nuova voce")
-            new_name = gr.Textbox(label="Nome", placeholder="es. anna",
-                                  info="Lettere minuscole, numeri, - e _. Diventa il nome della cartella e del "
-                                       "modello.")
-            new_lang = gr.Dropdown(choices=lang_choices, value="it", label="Lingua",
-                                   info="La lingua in cui la voce parlerà.")
-            with gr.Row():
-                create_btn = gr.Button("Crea la voce", variant="primary")
-                cancel_btn = gr.Button("Annulla")
-
-        # --- step 1: audio -------------------------------------------------------------------------------------
-        with gr.Column(visible=False) as panel1:
-            gr.Markdown("# Passo 1 di 5 · Audio\nCarica una o più registrazioni della voce da clonare, in "
-                        "qualsiasi formato. Meglio se: **un solo parlante, parlato pulito, niente musica né "
-                        "rumore**.")
-            upload = gr.File(file_count="multiple", type="filepath", label="Trascina qui i file audio")
-            audio_summary = gr.Markdown()
-            inputs_df = gr.Dataframe(headers=["file", "durata"], interactive=False, label="Registrazioni",
-                                     wrap=True)
-            with gr.Accordion("Rimuovi una registrazione", open=False):
+        with gr.Column() as create_main:
+            # --- welcome / new voice -----------------------------------------------------------------------------
+            with gr.Column(visible=not names) as welcome:
+                gr.Markdown("# Benvenuto\nCon **voice-clone** trasformi poche registrazioni di una voce in un modello "
+                            "Piper leggero, che parla in tempo reale anche senza GPU.\n\n"
+                            "1. **Audio**: carichi le registrazioni\n2. **Riferimento**: controlli la trascrizione\n"
+                            "3. **Dataset**: Drama 3 legge un migliaio di frasi con quella voce\n"
+                            "4. **Addestramento**: Piper impara la voce (qualche ora)\n"
+                            "5. **Esporta e prova**: ascolti il risultato e scarichi il modello\n\n"
+                            "Per iniziare: **＋ Nuova voce** nella barra a sinistra.")
+            with gr.Column(visible=False) as new_panel:
+                gr.Markdown("# Nuova voce")
+                new_name = gr.Textbox(label="Nome", placeholder="es. anna",
+                                      info="Lettere minuscole, numeri, - e _. Diventa il nome della cartella e del "
+                                           "modello.")
+                new_lang = gr.Dropdown(choices=lang_choices, value="it", label="Lingua",
+                                       info="La lingua in cui la voce parlerà.")
                 with gr.Row():
-                    remove_dd = gr.Dropdown(choices=[], label="File", scale=3)
-                    remove_btn = gr.Button("Rimuovi", variant="stop", scale=1)
-            next1 = gr.Button("Avanti →", variant="primary")
+                    create_btn = gr.Button("Crea la voce", variant="primary")
+                    cancel_btn = gr.Button("Annulla")
 
-        # --- step 2: reference ---------------------------------------------------------------------------------
-        with gr.Column(visible=False) as panel2:
-            gr.Markdown("# Passo 2 di 5 · Riferimento\nLe registrazioni vengono unite, tagliate in una pausa e "
-                        "trascritte: da qui nasce la voce che Drama 3 imiterà.")
-            with gr.Accordion("Opzioni avanzate", open=False):
-                max_seconds = gr.Slider(6, 60, value=30, step=1, label="Durata massima del riferimento (secondi)",
-                                        info="Drama 3 ascolta tutto il riferimento a ogni frase: 20–30 s bastano.")
-            ref_btn = gr.Button("Prepara il riferimento", variant="primary")
-            ref_summary = gr.Markdown()
-            ref_audio = gr.Audio(label="Riferimento", interactive=False)
-            transcript = gr.Textbox(label="Trascrizione", lines=4,
-                                    info="Controllala ascoltando il riferimento: Drama 3 ha bisogno delle parole "
-                                         "esatte. Correggi nomi e sigle, poi salva.")
-            save_btn = gr.Button("Salva la trascrizione e ricrea la voce")
-            gr.Markdown("### Prova la voce clonata")
-            with gr.Row():
-                try_text = gr.Textbox(show_label=False, placeholder="Scrivi una frase da far leggere a Drama 3",
-                                      scale=4)
-                try_btn = gr.Button("Ascolta", scale=1)
-            try_audio = gr.Audio(label="Prova", interactive=False)
-            next2 = gr.Button("Avanti →", variant="primary")
+            # --- step 1: audio -------------------------------------------------------------------------------------
+            with gr.Column(visible=False) as panel1:
+                gr.Markdown("# Passo 1 di 5 · Audio\nCarica una o più registrazioni della voce da clonare, in "
+                            "qualsiasi formato. Meglio se: **un solo parlante, parlato pulito, niente musica né "
+                            "rumore**.")
+                upload = gr.File(file_count="multiple", type="filepath", label="Trascina qui i file audio")
+                audio_summary = gr.Markdown()
+                inputs_df = gr.Dataframe(headers=["file", "durata"], interactive=False, label="Registrazioni",
+                                         wrap=True)
+                with gr.Accordion("Rimuovi una registrazione", open=False):
+                    with gr.Row():
+                        remove_dd = gr.Dropdown(choices=[], label="File", scale=3)
+                        remove_btn = gr.Button("Rimuovi", variant="stop", scale=1)
+                next1 = gr.Button("Avanti →", variant="primary")
 
-        # --- step 3: dataset -----------------------------------------------------------------------------------
-        with gr.Column(visible=False) as panel3:
-            gr.Markdown("# Passo 3 di 5 · Dataset\nDrama 3 legge molte frasi con la voce clonata; ogni clip viene "
-                        "controllata con il riconoscimento vocale e quelle sbagliate vengono rifatte.")
-            count = gr.Number(value=1000, precision=0, minimum=10, label="Numero di frasi",
-                              info="1000 frasi ≈ un'ora di parlato: un buon compromesso.")
-            estimate = gr.Markdown()
-            extra = gr.File(type="filepath", file_types=[".txt"],
-                            label="Frasi tue (facoltativo): un file .txt con una frase per riga, incluse sempre")
-            with gr.Accordion("Opzioni avanzate", open=False):
-                max_cer = gr.Number(value=0.05, label="Errore massimo per clip (0.05 = 5% dei caratteri)")
-                attempts = gr.Number(value=4, precision=0, label="Tentativi per frase")
-            ds_btn = gr.Button("Genera il dataset", variant="primary")
-            ds_summary = gr.Markdown()
-            clips_btn = gr.Button("🔊 Ascolta 4 clip a caso")
-            clip_players = [gr.Audio(interactive=False, visible=False) for _ in range(CLIP_SLOTS)]
-            next3 = gr.Button("Avanti →", variant="primary")
-
-        # --- step 4: training ----------------------------------------------------------------------------------
-        with gr.Column(visible=False) as panel4:
-            gr.Markdown("# Passo 4 di 5 · Addestramento\nPiper impara la voce partendo da una voce già addestrata "
-                        "nella stessa lingua. Il computer resta acceso finché lavora, e puoi chiudere questa pagina.")
-            epochs = gr.Number(value=2000, precision=0, minimum=1, label="Epoche")
-            train_info = gr.Markdown()
-            with gr.Accordion("Opzioni avanzate", open=False):
-                batch = gr.Number(value=0, precision=0, label="Batch size (0 = automatico in base alla GPU)")
-            train_btn = gr.Button("Avvia l'addestramento", variant="primary")
-            chart = gr.LinePlot(x="epoca", y="val_mel", height=280,
-                                title="Qualità durante l'addestramento (val_mel: più basso è meglio)")
-            next4 = gr.Button("Avanti →", variant="primary")
-
-        # --- step 5: export and test ---------------------------------------------------------------------------
-        with gr.Column(visible=False) as panel5:
-            gr.Markdown("# Passo 5 di 5 · Esporta e prova\nIl modello finale è un file `.onnx` (con il suo "
-                        "`.onnx.json`) che gira con Piper anche senza GPU. Si può esportare anche a metà "
-                        "addestramento, per sentire a che punto è.")
-            with gr.Row(equal_height=True):
-                which = gr.Radio([("Ultimo", "last"), ("Migliore (val_mel più basso)", "best")], value="last",
-                                 label="Checkpoint da esportare", scale=3)
-                export_btn = gr.Button("Esporta e prova", variant="primary", scale=1)
-            export_summary = gr.Markdown()
-            sample_players = [gr.Audio(interactive=False, visible=False) for _ in range(SAMPLE_SLOTS)]
-            with gr.Row():
-                say_box = gr.Textbox(show_label=False, placeholder="Scrivi una frase qualsiasi da far dire al modello",
-                                     scale=4)
-                say_btn = gr.Button("Leggi", scale=1)
-            say_audio = gr.Audio(label="Frase", interactive=False)
-            downloads = gr.File(label="Scarica il modello (.onnx + .onnx.json)", file_count="multiple",
-                                interactive=False)
-            with gr.Accordion("Confronta due checkpoint", open=False):
-                gr.Markdown("Esporta due checkpoint, ascolta le stesse frasi lette da entrambi e tieni quello che "
-                            "ti piace di più.")
+            # --- step 2: reference ---------------------------------------------------------------------------------
+            with gr.Column(visible=False) as panel2:
+                gr.Markdown("# Passo 2 di 5 · Riferimento\nLe registrazioni vengono unite, tagliate in una pausa e "
+                            "trascritte: da qui nasce la voce che Drama 3 imiterà.")
+                with gr.Accordion("Opzioni avanzate", open=False):
+                    max_seconds = gr.Slider(6, 60, value=30, step=1, label="Durata massima del riferimento (secondi)",
+                                            info="Drama 3 ascolta tutto il riferimento a ogni frase: 20–30 s bastano.")
+                ref_btn = gr.Button("Prepara il riferimento", variant="primary")
+                ref_summary = gr.Markdown()
+                ref_audio = gr.Audio(label="Riferimento", interactive=False)
+                transcript = gr.Textbox(label="Trascrizione", lines=4,
+                                        info="Controllala ascoltando il riferimento: Drama 3 ha bisogno delle parole "
+                                             "esatte. Correggi nomi e sigle, poi salva.")
+                save_btn = gr.Button("Salva la trascrizione e ricrea la voce")
+                gr.Markdown("### Prova la voce clonata")
                 with gr.Row():
-                    cmp_a = gr.Dropdown(choices=[], label="A")
-                    cmp_b = gr.Dropdown(choices=[], label="B")
-                compare_btn = gr.Button("Confronta", variant="primary")
-                compare_text = gr.Markdown()
-                with gr.Row():
-                    with gr.Column():
-                        players_a = [gr.Audio(interactive=False, visible=False) for _ in range(SAMPLE_SLOTS)]
-                        use_a = gr.Button("Usa A come modello")
-                    with gr.Column():
-                        players_b = [gr.Audio(interactive=False, visible=False) for _ in range(SAMPLE_SLOTS)]
-                        use_b = gr.Button("Usa B come modello")
+                    try_text = gr.Textbox(show_label=False, placeholder="Scrivi una frase da far leggere a Drama 3",
+                                          scale=4)
+                    try_btn = gr.Button("Ascolta", scale=1)
+                try_audio = gr.Audio(label="Prova", interactive=False)
+                next2 = gr.Button("Avanti →", variant="primary")
 
-        # --- job panel -----------------------------------------------------------------------------------------
-        gr.Markdown("---")
-        with gr.Row(equal_height=False):
-            job_html = gr.HTML(scale=6)
-            stop_btn = gr.Button("■ Ferma", variant="stop", visible=False, scale=0, min_width=120, size="sm")
-        with gr.Accordion("Mostra il log", open=False):
-            log_box = gr.Textbox(show_label=False, lines=14, max_lines=14, autoscroll=True, interactive=False)
+            # --- step 3: dataset -----------------------------------------------------------------------------------
+            with gr.Column(visible=False) as panel3:
+                gr.Markdown("# Passo 3 di 5 · Dataset\nDrama 3 legge molte frasi con la voce clonata; ogni clip viene "
+                            "controllata con il riconoscimento vocale e quelle sbagliate vengono rifatte.")
+                count = gr.Number(value=1000, precision=0, minimum=10, label="Numero di frasi",
+                                  info="1000 frasi ≈ un'ora di parlato: un buon compromesso.")
+                estimate = gr.Markdown()
+                extra = gr.File(type="filepath", file_types=[".txt"],
+                                label="Frasi tue (facoltativo): un file .txt con una frase per riga, incluse sempre")
+                with gr.Accordion("Opzioni avanzate", open=False):
+                    max_cer = gr.Number(value=0.05, label="Errore massimo per clip (0.05 = 5% dei caratteri)")
+                    attempts = gr.Number(value=4, precision=0, label="Tentativi per frase")
+                ds_btn = gr.Button("Genera il dataset", variant="primary")
+                ds_summary = gr.Markdown()
+                clips_btn = gr.Button("🔊 Ascolta 4 clip a caso")
+                clip_players = [gr.Audio(interactive=False, visible=False) for _ in range(CLIP_SLOTS)]
+                next3 = gr.Button("Avanti →", variant="primary")
+
+            # --- step 4: training ----------------------------------------------------------------------------------
+            with gr.Column(visible=False) as panel4:
+                gr.Markdown("# Passo 4 di 5 · Addestramento\nPiper impara la voce partendo da una voce già addestrata "
+                            "nella stessa lingua. Il computer resta acceso finché lavora, e puoi chiudere questa pagina.")
+                epochs = gr.Number(value=2000, precision=0, minimum=1, label="Epoche")
+                train_info = gr.Markdown()
+                with gr.Accordion("Opzioni avanzate", open=False):
+                    batch = gr.Number(value=0, precision=0, label="Batch size (0 = automatico in base alla GPU)")
+                train_btn = gr.Button("Avvia l'addestramento", variant="primary")
+                chart = gr.LinePlot(x="epoca", y="val_mel", height=280,
+                                    title="Qualità durante l'addestramento (val_mel: più basso è meglio)")
+                next4 = gr.Button("Avanti →", variant="primary")
+
+            # --- step 5: export and test ---------------------------------------------------------------------------
+            with gr.Column(visible=False) as panel5:
+                gr.Markdown("# Passo 5 di 5 · Esporta e prova\nIl modello finale è un file `.onnx` (con il suo "
+                            "`.onnx.json`) che gira con Piper anche senza GPU. Si può esportare anche a metà "
+                            "addestramento, per sentire a che punto è.")
+                with gr.Row(equal_height=True):
+                    which = gr.Radio([("Ultimo", "last"), ("Migliore (val_mel più basso)", "best")], value="last",
+                                     label="Checkpoint da esportare", scale=3)
+                    export_btn = gr.Button("Esporta e prova", variant="primary", scale=1)
+                export_summary = gr.Markdown()
+                sample_players = [gr.Audio(interactive=False, visible=False) for _ in range(SAMPLE_SLOTS)]
+                with gr.Row():
+                    say_box = gr.Textbox(show_label=False, placeholder="Scrivi una frase qualsiasi da far dire al modello",
+                                         scale=4)
+                    say_btn = gr.Button("Leggi", scale=1)
+                say_audio = gr.Audio(label="Frase", interactive=False)
+                downloads = gr.File(label="Scarica il modello (.onnx + .onnx.json)", file_count="multiple",
+                                    interactive=False)
+                with gr.Accordion("Confronta due checkpoint", open=False):
+                    gr.Markdown("Esporta due checkpoint, ascolta le stesse frasi lette da entrambi e tieni quello che "
+                                "ti piace di più.")
+                    with gr.Row():
+                        cmp_a = gr.Dropdown(choices=[], label="A")
+                        cmp_b = gr.Dropdown(choices=[], label="B")
+                    compare_btn = gr.Button("Confronta", variant="primary")
+                    compare_text = gr.Markdown()
+                    with gr.Row():
+                        with gr.Column():
+                            players_a = [gr.Audio(interactive=False, visible=False) for _ in range(SAMPLE_SLOTS)]
+                            use_a = gr.Button("Usa A come modello")
+                        with gr.Column():
+                            players_b = [gr.Audio(interactive=False, visible=False) for _ in range(SAMPLE_SLOTS)]
+                            use_b = gr.Button("Usa B come modello")
+
+            # --- job panel -----------------------------------------------------------------------------------------
+            gr.Markdown("---")
+            with gr.Row(equal_height=False):
+                job_html = gr.HTML(scale=6)
+                stop_btn = gr.Button("■ Ferma", variant="stop", visible=False, scale=0, min_width=120, size="sm")
+            with gr.Accordion("Mostra il log", open=False):
+                log_box = gr.Textbox(show_label=False, lines=14, max_lines=14, autoscroll=True, interactive=False)
+
+        studio_main, (studio_show, studio_inputs, studio_outputs) = web_studio.build()
 
         # --- wiring --------------------------------------------------------------------------------------------
         panels = [panel1, panel2, panel3, panel4, panel5]
@@ -710,6 +720,13 @@ def build() -> gr.Blocks:
         compare_btn.click(start_compare, [voice_radio, cmp_a, cmp_b])
         use_a.click(lambda n: promote(n, "a"), voice_radio).then(refresh_panels, voice_radio, panel_outputs)
         use_b.click(lambda n: promote(n, "b"), voice_radio).then(refresh_panels, voice_radio, panel_outputs)
+        def switch(which):
+            studio = which == "studio"
+            return (gr.Column(visible=not studio), gr.Column(visible=studio), gr.Column(visible=not studio),
+                    gr.Column(visible=studio))
+
+        mode.change(switch, mode, [create_side, studio_side, create_main, studio_main], show_progress="hidden").then(
+            studio_show, studio_inputs, studio_outputs, show_progress="hidden")
     return demo
 
 
