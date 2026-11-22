@@ -71,7 +71,7 @@ def test_prune_keeps_best_across_runs_and_newest_last(voices_dir):
             (d / name).write_bytes(b"")
             os.utime(d / name, (1000 + version * 10 + n, 1000 + version * 10 + n))
     assert train.prune_checkpoints(voice, keep=2) == 3
-    left = sorted(str(p.relative_to(voice.training_dir / "lightning_logs"))
+    left = sorted(p.relative_to(voice.training_dir / "lightning_logs").as_posix()
                   for p in voice.training_dir.rglob("*.ckpt"))
     assert left == ["version_0/checkpoints/epoch=2-val_mel=0.4000.ckpt",
                     "version_1/checkpoints/epoch=5-val_mel=0.3000.ckpt", "version_1/checkpoints/last.ckpt"]
