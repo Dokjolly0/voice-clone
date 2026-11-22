@@ -26,6 +26,8 @@ Once you have a voice (yours, one from Piper's catalog, or any Piper model), the
 audio files: MP3, WAV, OGG, Opus, FLAC or M4A, with speed, volume, pitch, expressiveness, pauses, a pronunciation
 dictionary, one file per line and a history. See [Audio studio](#audio-studio).
 
+The full documentation, module by module, is in [docs/](docs/README.md).
+
 Everything is resumable: stop any stage (Ctrl-C, `voice-clone stop`, a reboot) and run it again to continue where
 it was.
 

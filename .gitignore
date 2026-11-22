@@ -8,10 +8,10 @@ __pycache__/
 third_party/
 
 # Voice workspaces: audio, datasets, checkpoints, models
-voices/
+/voices/
 
 # Machine settings written by `voice-clone setup`
 settings.json
 
 # Audio studio: imported and downloaded models, dictionaries, generation history
-studio/
+/studio/
