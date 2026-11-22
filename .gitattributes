@@ -1,0 +1,5 @@
+# Shell scripts keep LF endings everywhere; Windows scripts get CRLF.
+voice-clone text eol=lf
+*.sh text eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
