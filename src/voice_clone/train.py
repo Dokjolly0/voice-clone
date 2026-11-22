@@ -69,7 +69,7 @@ def base_checkpoint(voice: Voice) -> tuple[Path, dict]:
         download(HF_FILE + urllib.parse.quote(f"{folder}/config.json"), config_path)
         download(HF_FILE + urllib.parse.quote(f"{folder}/{ckpt_names[0]}"), cache / ckpt_names[0])
         ckpts = [cache / ckpt_names[0]]
-    return ckpts[0], json.loads(config_path.read_text())
+    return ckpts[0], json.loads(config_path.read_text(encoding="utf-8"))
 
 
 def last_checkpoint(voice: Voice) -> Path | None:
@@ -162,7 +162,7 @@ def command(voice: Voice, settings: Settings) -> list[str]:
         if settings.init_from:
             if not Path(settings.init_from).is_file():
                 raise UserError(f"checkpoint not found: {settings.init_from}")
-            start = Path(settings.init_from)
+            start = Path(settings.init_from).resolve()  # Piper runs in the training folder
             info(f"starting from {start} instead of the base voice")
         cmd += ["--model.warmstart_ckpt", str(start)]
     return cmd

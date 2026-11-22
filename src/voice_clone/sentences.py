@@ -53,7 +53,7 @@ def corpus_files(lang: Language, wanted: int) -> list[Path]:
     cache = CACHE_DIR / "common-voice" / lang.common_voice
     index_file = cache / "index.json"
     if index_file.exists():
-        index = json.loads(index_file.read_text())
+        index = json.loads(index_file.read_text(encoding="utf-8"))
     else:
         info(f"Listing Common Voice sentences for {lang.name}")
         try:
@@ -63,7 +63,7 @@ def corpus_files(lang: Language, wanted: int) -> list[Path]:
         index = sorted(({"name": e["name"], "size": e["size"], "url": e["download_url"]}
                         for e in listing if e["name"].endswith(".txt")), key=lambda e: e["size"])
         cache.mkdir(parents=True, exist_ok=True)
-        index_file.write_text(json.dumps(index, indent=1))
+        index_file.write_text(json.dumps(index, indent=1), encoding="utf-8")
 
     files, lines = [], 0
     for entry in index:

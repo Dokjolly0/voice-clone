@@ -90,7 +90,7 @@ def speak(onnx: Path, text: str, out: Path) -> Path:
         raise UserError(f"model not found: {onnx}")
     out.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run([str(PIPER_PYTHON), "-m", "piper", "-m", str(onnx), "-f", str(out), "--", text],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, encoding="utf-8", errors="replace")
     if result.returncode != 0 or not out.exists():
         raise UserError(f"piper failed: {result.stderr.strip()[-1500:]}")
     return out

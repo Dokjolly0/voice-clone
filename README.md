@@ -1,5 +1,8 @@
 # voice-clone
 
+[![CI](https://github.com/Dokjolly0/voice-clone/actions/workflows/ci.yml/badge.svg)](https://github.com/Dokjolly0/voice-clone/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Dokjolly0/voice-clone?include_prereleases)](https://github.com/Dokjolly0/voice-clone/releases)
+
 Clone a voice from a few recordings into a **lightweight [Piper](https://github.com/OHF-voice/piper1-gpl) TTS
 model**: a ~60 MB ONNX file that speaks in real time on a CPU, without a GPU and without the large model that
 created it.
@@ -28,7 +31,8 @@ it was.
 
 ## Requirements
 
-- Linux with `dnf` (Fedora) or `apt` (Ubuntu/Debian). Tested on Fedora 45.
+- Linux with `dnf` (Fedora) or `apt` (Ubuntu/Debian), tested on Fedora 45; or **Windows 10/11** (64-bit), see
+  [Windows](#windows).
 - An **NVIDIA GPU** with the proprietary driver: 8 GB of VRAM at the very least, 16–24 GB recommended (Drama 3
   alone uses up to 15 GB of RAM and 7+ GB of VRAM). Tested on an RTX 4090.
   Without one, a **CPU-only mode** works too, much more slowly: see [CPU-only mode](#cpu-only-mode).
@@ -204,6 +208,44 @@ times faster than real time. Its data lives in `studio/` (`VOICE_CLONE_STUDIO` m
 ./voice-clone speak imported:pos --file messaggi.txt --per-line messaggi/ --format wav --sample-rate 44100
 ```
 
+## Windows
+
+Everything works natively on Windows 10/11, training included. Use `voice-clone.cmd` (from cmd or PowerShell)
+wherever this README says `./voice-clone`:
+
+```bat
+git clone https://github.com/Dokjolly0/voice-clone.git
+cd voice-clone
+voice-clone.cmd doctor          rem lists what is missing, with the winget command for it
+voice-clone.cmd setup
+voice-clone.cmd web
+```
+
+Or download `voice-clone-<version>-windows.zip` from [Releases](https://github.com/Dokjolly0/voice-clone/releases)
+and run `voice-clone.cmd` from the unpacked folder.
+
+What you install yourself (`doctor` and `setup` print these commands when something is missing):
+
+| | Command | Needed for |
+|---|---|---|
+| NVIDIA driver | from [nvidia.com/drivers](https://www.nvidia.com/drivers) or the NVIDIA app | GPU mode (it also brings Vulkan and `nvidia-smi`) |
+| Git | `winget install -e --id Git.Git` | setup (Piper's training code) |
+| FFmpeg | `winget install -e --id Gyan.FFmpeg` | everything that reads or writes audio |
+| C++ Build Tools | `winget install -e --id Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"` | setup: Piper's training code has compiled parts |
+
+Open a new terminal after installing them, so PATH includes the new tools. The rest comes by itself, as on Linux:
+`uv` (in `%USERPROFILE%\.local\bin`), speech.cpp's Vulkan build (in `%LOCALAPPDATA%\Programs\speech.cpp`, through
+its `install.ps1`), and Piper's environment with the CUDA build of PyTorch that matches your driver. The cache is in
+`%LOCALAPPDATA%\voice-clone\cache`.
+
+Differences from Linux:
+
+- Background jobs run without a console window; `voice-clone.cmd stop NAME` (or the web page) stops them cleanly.
+- During the dataset and training stages Windows does not go to sleep by itself (sleep you ask for still happens).
+- The audio studio only needs the app: `voice-clone.cmd speak ...` and the "Genera audio" page work without
+  `setup`, without a GPU and without the Build Tools.
+- WSL2 with Ubuntu is an alternative: there the Linux instructions apply as they are.
+
 ## CPU-only mode
 
 Every stage also runs without a GPU: `./voice-clone setup --device cpu` (chosen automatically when no NVIDIA driver
@@ -249,7 +291,8 @@ voices/<name>/
 The audio studio keeps its data in `studio/`: `models/` (downloaded and imported models), `lexicon/<lang>.json`,
 `history/` and `preferences.json`.
 
-Shared downloads are cached in `~/.cache/voice-clone` (Common Voice sentences, base checkpoints) and
+Shared downloads are cached in `~/.cache/voice-clone` (Common Voice sentences, base checkpoints; on Windows
+`%LOCALAPPDATA%\voice-clone\cache`) and
 `~/.cache/speech.cpp` (models). Set `VOICE_CLONE_VOICES` or `VOICE_CLONE_CACHE` to move them.
 
 ## Using the voice
@@ -263,6 +306,9 @@ directly with espeak-ng for phonemes.
 
 - **`speech.cpp does not see the GPU`**: the NVIDIA driver or the Vulkan loader is missing. Install them, delete
   `~/.local/bin/speech` and run `setup` again: the installer picks the Vulkan build only when it finds Vulkan.
+  (On Windows the build is always Vulkan: update the NVIDIA driver.)
+- **Windows: Piper fails to compile** during `setup`: install the C++ Build Tools (see [Windows](#windows)), open a
+  new terminal and run `setup` again.
 - **Many clips rejected**: look at `state.json`; entries show the sentence (`text`) and what was heard (`heard`).
   If only spellings differ (the recognizer wrote "di un" for "d'un"), raise `--max-cer` a little (e.g. 0.08). If the
   audio really skips or repeats words, a few per hundred is normal and retries fix them.
@@ -274,6 +320,11 @@ directly with espeak-ng for phonemes.
 ```sh
 uv run pytest        # unit tests
 ```
+
+CI (`.github/workflows/ci.yml`) runs the tests, the launchers, `doctor` and a real synthesis on Ubuntu and Windows
+for every push and pull request. When it passes on `main`, `release.yml` publishes a release
+`v<version>-build.<n>` with the wheel, the sdist and archives for Windows and Linux. Platform differences live in
+`src/voice_clone/host.py`.
 
 Design notes:
 

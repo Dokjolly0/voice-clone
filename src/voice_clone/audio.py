@@ -28,7 +28,7 @@ def _probe_duration(path: Path) -> float:
         out = subprocess.run(
             ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
         ).stdout.strip()
         return float(out)
     except (subprocess.CalledProcessError, ValueError) as exc:
@@ -48,7 +48,7 @@ def wav_duration(path: Path) -> float:
 def ffmpeg(args: list, *, capture_stderr: bool = False) -> str:
     cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "info" if capture_stderr else "error", "-y",
            *[str(a) for a in args]]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if result.returncode != 0:
         raise UserError(f"ffmpeg failed: {result.stderr.strip()[-1500:]}")
     return result.stderr

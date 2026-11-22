@@ -27,10 +27,12 @@ def warn(msg: str) -> None:
 
 
 def which(name: str) -> str | None:
-    """Like shutil.which, also looking in ~/.local/bin, where uv and speech.cpp install themselves."""
-    from voice_clone.paths import LOCAL_BIN
+    """Like shutil.which, also looking where uv and speech.cpp install themselves (~/.local/bin, and on Windows
+    speech.cpp's folder), which may not be on PATH until a new shell starts."""
+    from voice_clone import host
 
-    return shutil.which(name) or shutil.which(name, path=str(LOCAL_BIN))
+    extra = os.pathsep.join(str(d) for d in host.extra_bin_dirs())
+    return shutil.which(name) or shutil.which(name, path=extra)
 
 
 def run(cmd: list, *, check: bool = True, capture: bool = False, cwd: Path | None = None,
@@ -40,8 +42,8 @@ def run(cmd: list, *, check: bool = True, capture: bool = False, cwd: Path | Non
     info(f"$ {shlex.join(cmd)}")
     full_env = {**os.environ, **(env or {})}
     try:
-        return subprocess.run(cmd, check=check, cwd=cwd, env=full_env, text=True,
-                              capture_output=capture)
+        return subprocess.run(cmd, check=check, cwd=cwd, env=full_env, text=True, encoding="utf-8",
+                              errors="replace", capture_output=capture)
     except FileNotFoundError as exc:
         raise UserError(f"command not found: {cmd[0]}") from exc
     except subprocess.CalledProcessError as exc:
@@ -60,7 +62,22 @@ def write_json(path: Path, data) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    tmp.replace(path)
+    replace(tmp, path)
+
+
+def replace(src: Path, dst: Path, attempts: int = 20) -> None:
+    """Path.replace, retried briefly: on Windows it fails while another process (the web page polling progress)
+    has the destination open."""
+    import time
+
+    for attempt in range(attempts):
+        try:
+            src.replace(dst)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.05)
 
 
 def download(url: str, dst: Path, md5: str | None = None) -> Path:

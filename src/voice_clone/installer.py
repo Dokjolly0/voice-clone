@@ -12,11 +12,12 @@ import json
 import subprocess
 import time
 
-from voice_clone import settings, system
+from voice_clone import host, settings, system
 from voice_clone.paths import PIPER_DIR, PIPER_PYTHON, PIPER_REPO, PIPER_REV, THIRD_PARTY_DIR
 from voice_clone.util import UserError, info, run, step, warn, which
 
 SPEECH_INSTALLER = "https://raw.githubusercontent.com/nyosegawa/speech.cpp/main/install.sh"
+SPEECH_INSTALLER_WINDOWS = "https://raw.githubusercontent.com/nyosegawa/speech.cpp/main/install.ps1"
 SYNTH_MODEL = "drama-3"
 ASR_MODEL = "qwen3-asr-0.6b"
 PIPER_MARKER = THIRD_PARTY_DIR / ".piper-ready"
@@ -42,8 +43,27 @@ def speech_bin() -> str:
 
 
 def speech_gpus() -> list[dict]:
-    out = subprocess.run([speech_bin(), "devices", "--json"], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run([speech_bin(), "devices", "--json"], capture_output=True, text=True, encoding="utf-8",
+                         errors="replace", check=True).stdout
     return [d for d in json.loads(out).get("devices", []) if d.get("kind") == "gpu"]
+
+
+def speech_install_command() -> list[str]:
+    """speech.cpp's own installer: install.ps1 on Windows (Vulkan build in %LOCALAPPDATA%\\Programs\\speech.cpp),
+    install.sh on Linux (Vulkan or CPU build, linked into ~/.local/bin)."""
+    if host.IS_WINDOWS:
+        return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+                f"irm {SPEECH_INSTALLER_WINDOWS} | iex"]
+    return ["sh", "-c", f"curl -fsSL {SPEECH_INSTALLER} | sh"]
+
+
+def torch_backend(device: str) -> list[str]:
+    """uv's PyTorch build. CPU: the CPU-only build, without ~3 GB of CUDA libraries. GPU on Linux: PyPI's build,
+    which comes with CUDA. GPU on Windows: PyPI only has CPU builds there, so uv picks the CUDA build that matches
+    the installed driver."""
+    if device == "cpu":
+        return ["--torch-backend", "cpu"]
+    return ["--torch-backend", "auto"] if host.IS_WINDOWS else []
 
 
 def device_args() -> list[str]:
@@ -89,14 +109,18 @@ def check_system(device: str) -> system.SystemReport:
 def install_speech(device: str) -> None:
     step("speech.cpp (Drama 3 and Qwen3-ASR runtime)")
     if not which("speech"):
-        run(["sh", "-c", f"curl -fsSL {SPEECH_INSTALLER} | sh"])
+        run(speech_install_command())
+        if not which("speech"):
+            raise UserError("speech.cpp's installer finished but the speech program was not found; open a new "
+                            "terminal and run setup again")
     if device == "cpu":
         info("speech.cpp installed; it will run on the CPU")
         return
     gpus = speech_gpus()
     if not gpus:
+        where = "speech.cpp's folder in %LOCALAPPDATA%\\Programs" if host.IS_WINDOWS else "~/.local/bin/speech"
         raise UserError("speech.cpp does not see the GPU (the CPU build was installed?). Check that the NVIDIA "
-                        "driver and the Vulkan loader are installed, delete ~/.local/bin/speech and run setup again, "
+                        f"driver and the Vulkan loader are installed, delete {where} and run setup again, "
                         "or use the CPU: voice-clone setup --device cpu")
     info(f"speech.cpp sees: {', '.join(d['name'] + ' (' + d['description'] + ')' for d in gpus)}")
 
@@ -115,12 +139,14 @@ def pull_models() -> None:
 
 
 def _piper_check(device: str) -> subprocess.CompletedProcess:
-    return subprocess.run([str(PIPER_PYTHON), "-c", PIPER_CHECK, device], capture_output=True, text=True)
+    return subprocess.run([str(PIPER_PYTHON), "-c", PIPER_CHECK, device], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
 
 
 def piper_ready(device: str | None = None) -> bool:
     device = device or settings.device()
-    if not (PIPER_MARKER.exists() and PIPER_MARKER.read_text().split()[:1] == [PIPER_REV] and PIPER_PYTHON.exists()):
+    marker = PIPER_MARKER.read_text(encoding="utf-8").split() if PIPER_MARKER.exists() else []
+    if not (marker[:1] == [PIPER_REV] and PIPER_PYTHON.exists()):
         return False
     return _piper_check(device).returncode == 0
 
@@ -142,29 +168,34 @@ def install_piper(device: str) -> None:
     # Its own environment: PyTorch, Lightning and CUDA stay out of the app's environment.
     if not PIPER_PYTHON.exists():
         run([uv, "venv", "--seed", "--python", "3.12", PIPER_DIR / ".venv"])
-    # GPU: PyPI's PyTorch, which is built with CUDA. CPU: the CPU-only build, without ~3 GB of CUDA libraries.
     # When the mode changed since the last install, PyTorch is reinstalled in place.
-    previous = PIPER_MARKER.read_text().split()[1:2] if PIPER_MARKER.exists() else []
+    previous = PIPER_MARKER.read_text(encoding="utf-8").split()[1:2] if PIPER_MARKER.exists() else []
     previous_device = previous[0] if previous else ("gpu" if PIPER_MARKER.exists() else None)
-    backend = ["--torch-backend", "cpu"] if device == "cpu" else []
+    backend = torch_backend(device)
     if previous_device and previous_device != device:
         backend += ["--reinstall-package", "torch"]
     run([uv, "pip", "install", "--python", PIPER_PYTHON, *backend, "-e", f"{PIPER_DIR}[train]",
          "scikit-build", "cmake>=3.26,<4", "ninja", "cython"])
 
+    if host.IS_WINDOWS and not system.find_msvc():
+        raise UserError("Piper's training code is compiled with Visual Studio's C++ compilers, which were not found. "
+                        "Install them, then run setup again:\n  winget install -e --id "
+                        "Microsoft.VisualStudio.2022.BuildTools "
+                        + system.WINGET_OPTIONS["Microsoft.VisualStudio.2022.BuildTools"])
     # Two compiled pieces Piper's training needs and its package does not build when installed for development.
     align_dir = PIPER_DIR / "src/piper/train/vits/monotonic_align"
     (align_dir / "monotonic_align").mkdir(exist_ok=True)
-    run([PIPER_PYTHON.parent / "cythonize", "-i", "core.pyx"], cwd=align_dir)
-    for so in align_dir.glob("core*.so"):
-        so.replace(align_dir / "monotonic_align" / so.name)
+    run([host.venv_script(PIPER_DIR / ".venv", "cythonize"), "-i", "core.pyx"], cwd=align_dir)
+    for suffix in host.ext_suffixes():
+        for ext in align_dir.glob(f"core*{suffix}"):
+            ext.replace(align_dir / "monotonic_align" / ext.name)
     run([PIPER_PYTHON, "setup.py", "build_ext", "--inplace"], cwd=PIPER_DIR, capture=True)
 
     result = _piper_check(device)
     if result.returncode != 0:
         raise UserError("Piper was installed but does not work:\n" + result.stderr.strip()[-2000:])
     info(result.stdout.strip())
-    PIPER_MARKER.write_text(f"{PIPER_REV} {device}\n")
+    PIPER_MARKER.write_text(f"{PIPER_REV} {device}\n", encoding="utf-8")
 
 
 def setup(skip_models: bool = False, device: str = "auto") -> None:

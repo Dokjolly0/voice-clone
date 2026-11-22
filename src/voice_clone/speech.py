@@ -28,7 +28,7 @@ def _transcribe_batch(chunk: list[str], lang: str, attempts: int = 2) -> dict[st
     shutdown): complete output is accepted, anything else is retried once."""
     cmd = [speech_bin(), "asr", ASR_MODEL, *device_args(), "--language", lang, "--format", "json", *chunk]
     for attempt in range(1, attempts + 1):
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         texts = {}
         for line in result.stdout.splitlines():
             if line.strip():
