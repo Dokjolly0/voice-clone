@@ -9,7 +9,7 @@ import urllib.request
 from pathlib import Path
 
 from voice_clone.installer import ASR_MODEL, SYNTH_MODEL, device_args, speech_bin
-from voice_clone.util import UserError, run
+from voice_clone.util import UserError, run, warn
 
 VOICE_NAME = "voice"
 
@@ -19,16 +19,31 @@ def transcribe(files: list[Path], lang: str, batch: int = 100) -> dict[str, str]
     texts = {}
     for k in range(0, len(files), batch):
         chunk = [str(f) for f in files[k:k + batch]]
-        result = subprocess.run([speech_bin(), "asr", ASR_MODEL, *device_args(), "--language", lang, "--format", "json",
-                                 *chunk],
-                                capture_output=True, text=True, encoding="utf-8")
-        if result.returncode != 0:
-            raise UserError(f"speech asr failed: {result.stderr.strip()[-1500:]}")
+        texts.update(_transcribe_batch(chunk, lang))
+    return texts
+
+
+def _transcribe_batch(chunk: list[str], lang: str, attempts: int = 2) -> dict[str, str]:
+    """One `speech asr` run. It has been seen to exit with an error code after printing every result (a crash on
+    shutdown): complete output is accepted, anything else is retried once."""
+    cmd = [speech_bin(), "asr", ASR_MODEL, *device_args(), "--language", lang, "--format", "json", *chunk]
+    for attempt in range(1, attempts + 1):
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+        texts = {}
         for line in result.stdout.splitlines():
             if line.strip():
-                r = json.loads(line)
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
                 texts[r["file"]] = r["text"].strip()
-    return texts
+        if all(f in texts for f in chunk):
+            if result.returncode != 0:
+                warn(f"speech asr exited with code {result.returncode} after recognizing every file; results kept")
+            return texts
+        if attempt < attempts:
+            warn(f"speech asr failed (exit {result.returncode}, {len(texts)}/{len(chunk)} files); retrying")
+    raise UserError(f"speech asr failed (exit {result.returncode}): {result.stderr.strip()[-1500:]}")
 
 
 def make_voice(recordings: list[tuple[Path, str]], out: Path) -> None:
