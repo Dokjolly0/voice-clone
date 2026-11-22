@@ -12,7 +12,7 @@ import json
 import subprocess
 import time
 
-from voice_clone import settings, system
+from voice_clone import host, settings, system
 from voice_clone.paths import PIPER_DIR, PIPER_PYTHON, PIPER_REPO, PIPER_REV, THIRD_PARTY_DIR
 from voice_clone.util import UserError, info, run, step, warn, which
 
@@ -155,9 +155,10 @@ def install_piper(device: str) -> None:
     # Two compiled pieces Piper's training needs and its package does not build when installed for development.
     align_dir = PIPER_DIR / "src/piper/train/vits/monotonic_align"
     (align_dir / "monotonic_align").mkdir(exist_ok=True)
-    run([PIPER_PYTHON.parent / "cythonize", "-i", "core.pyx"], cwd=align_dir)
-    for so in align_dir.glob("core*.so"):
-        so.replace(align_dir / "monotonic_align" / so.name)
+    run([host.venv_script(PIPER_DIR / ".venv", "cythonize"), "-i", "core.pyx"], cwd=align_dir)
+    for suffix in host.ext_suffixes():
+        for ext in align_dir.glob(f"core*{suffix}"):
+            ext.replace(align_dir / "monotonic_align" / ext.name)
     run([PIPER_PYTHON, "setup.py", "build_ext", "--inplace"], cwd=PIPER_DIR, capture=True)
 
     result = _piper_check(device)

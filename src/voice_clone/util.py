@@ -27,10 +27,12 @@ def warn(msg: str) -> None:
 
 
 def which(name: str) -> str | None:
-    """Like shutil.which, also looking in ~/.local/bin, where uv and speech.cpp install themselves."""
-    from voice_clone.paths import LOCAL_BIN
+    """Like shutil.which, also looking where uv and speech.cpp install themselves (~/.local/bin, and on Windows
+    speech.cpp's folder), which may not be on PATH until a new shell starts."""
+    from voice_clone import host
 
-    return shutil.which(name) or shutil.which(name, path=str(LOCAL_BIN))
+    extra = os.pathsep.join(str(d) for d in host.extra_bin_dirs())
+    return shutil.which(name) or shutil.which(name, path=extra)
 
 
 def run(cmd: list, *, check: bool = True, capture: bool = False, cwd: Path | None = None,
