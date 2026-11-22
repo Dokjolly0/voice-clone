@@ -57,6 +57,9 @@ mostly downloads:
 - **Piper's training code**, pinned to a tested commit, in `third_party/piper1-gpl` with its own PyTorch + CUDA
   environment, and its compiled extensions built.
 
+Only want to generate audio with a model that is already trained? See
+[Speaking only, no training](#speaking-only-no-training): no GPU, no 30 GB, a couple of minutes.
+
 `setup` picks GPU mode when a working NVIDIA driver is found and CPU mode otherwise; force one with
 `--device gpu` or `--device cpu` (the choice is saved in `settings.json`).
 
@@ -111,6 +114,7 @@ The result is in `voices/anna/export/`, and test sentences are in `voices/anna/s
 | Command | What it does |
 |---|---|
 | `setup [--skip-models] [--device auto\|gpu\|cpu]` | install and verify everything (no root needed; prints the sudo command if packages are missing) |
+| `setup --inference-only` | a machine that only speaks with ready models: check FFmpeg and the speech engine, nothing else ([details](#speaking-only-no-training)) |
 | `doctor` | report what is installed, change nothing |
 | `languages` | list supported languages and their base Piper voice |
 | `new NAME --lang L` | create the voice workspace `voices/NAME/` |
@@ -200,8 +204,8 @@ line, turn text into audio with any Piper model:
 - **History**: every generation from the web page is kept (the newest 200) with its text, model and settings, to
   replay, download, reuse or delete.
 
-The studio runs on the CPU with `piper-tts` (onnxruntime) in the app's own environment: no GPU, PyTorch or `setup`
-needed. Measured on a Ryzen 9 7950X3D: 226 s of audio in 4.3 s (~50× real time); a 4-core CPU still runs several
+The studio runs on the CPU with `piper-tts` (onnxruntime) in the app's own environment: no GPU, PyTorch or full `setup`
+needed (see [Speaking only, no training](#speaking-only-no-training)). Measured on a Ryzen 9 7950X3D: 226 s of audio in 4.3 s (~50× real time); a 4-core CPU still runs several
 times faster than real time. Its data lives in `studio/` (`VOICE_CLONE_STUDIO` moves it).
 
 ```sh
@@ -209,6 +213,26 @@ times faster than real time. Its data lives in `studio/` (`VOICE_CLONE_STUDIO` m
     --format mp3 --speed 1.1 --pitch -1 --paragraph-pause 1 -o annuncio.mp3
 ./voice-clone speak imported:pos --file messaggi.txt --per-line messaggi/ --format wav --sample-rate 44100
 ```
+
+### Speaking only, no training
+
+On a machine that only generates audio with ready models (a voice trained on another computer, or one of Piper's
+official voices) nothing of the training side is needed: no GPU, speech.cpp, Drama 3, PyTorch, Git or compilers.
+Install FFmpeg (`sudo dnf install ffmpeg-free`, `sudo apt install ffmpeg`, `winget install -e --id Gyan.FFmpeg`),
+then:
+
+```sh
+./voice-clone setup --inference-only        # checks FFmpeg and the speech engine; installs nothing else
+./voice-clone models import it_IT-anna-medium.onnx it_IT-anna-medium.onnx.json --name anna
+./voice-clone speak imported:anna "Ciao, questa è una prova." -o prova.wav
+./voice-clone web                           # or the "Genera audio" page
+```
+
+A trained voice's model is `voices/NAME/export/<locale>-NAME-medium.onnx` with its `.onnx.json` beside it (after
+`export`). Instead of
+your own, `models catalog --lang it` and `models download it_IT-paola-medium` fetch Piper's voices. The disk needed
+is the app's environment (a few hundred MB) plus ~60 MB per medium-quality model. `export`, `compare` and every
+stage before them still need the full `setup`.
 
 ## Windows
 

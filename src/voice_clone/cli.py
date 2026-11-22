@@ -13,6 +13,12 @@ from voice_clone.util import UserError
 def cmd_setup(args):
     from voice_clone import installer
 
+    if args.inference_only:
+        if args.device != "auto" or args.skip_models:
+            raise UserError("--inference-only installs no models and does not use the GPU: "
+                            "drop --device and --skip-models")
+        installer.setup_inference()
+        return
     installer.setup(skip_models=args.skip_models, device=args.device)
 
 
@@ -303,6 +309,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--skip-models", action="store_true", help="do not download Drama 3 and Qwen3-ASR now")
     p.add_argument("--device", choices=["auto", "gpu", "cpu"], default="auto",
                    help="gpu (NVIDIA, fast), cpu (no GPU, much slower) or auto (gpu if an NVIDIA driver works)")
+    p.add_argument("--inference-only", action="store_true",
+                   help="only speak with ready models: check FFmpeg and the speech engine, install no training "
+                        "tools, speech.cpp or models")
     p.set_defaults(func=cmd_setup)
 
     p = sub.add_parser("doctor", help="report what is installed, without changing anything")

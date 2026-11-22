@@ -6,6 +6,10 @@
 Two modes, saved in settings.json: "gpu" (NVIDIA driver, speech.cpp's Vulkan build, PyTorch with CUDA) and "cpu"
 (no GPU needed, CPU-only PyTorch; much slower). Every part is skipped when it is already in place, so running setup
 again is cheap.
+
+`voice-clone setup --inference-only` is for a machine that only speaks with ready models (trained elsewhere,
+imported or downloaded from Piper's catalog): it checks FFmpeg and the studio's engine (piper-tts with onnxruntime,
+already in the app's environment) and installs nothing else.
 """
 
 import json
@@ -212,6 +216,51 @@ def setup(skip_models: bool = False, device: str = "auto") -> None:
     info("Next: voice-clone new <name> --lang <language>")
 
 
+def ffmpeg_has_rubberband() -> bool:
+    """Whether FFmpeg was built with the rubberband filter, which the studio's pitch option uses."""
+    try:
+        out = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=30).stdout
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return any(line.split()[1:2] == ["rubberband"] for line in out.splitlines())
+
+
+def inference_engine() -> str:
+    """The versions of the studio's engine; raises UserError when it does not import."""
+    try:
+        from importlib.metadata import version
+
+        import onnxruntime
+        from piper import PiperVoice  # noqa: F401
+    except ImportError as e:
+        raise UserError(f"the speech engine (piper-tts) does not import: {e}. Start the program with ./voice-clone "
+                        "(voice-clone.cmd on Windows), which installs it.") from e
+    return f"piper-tts {version('piper-tts')}, onnxruntime {onnxruntime.__version__}"
+
+
+def setup_inference() -> None:
+    """Only what speaking with a ready model needs: FFmpeg and piper-tts. No speech.cpp, PyTorch or models."""
+    step("Checking the system (inference only)")
+    report = system.check(inference_only=True)
+    info(f"Distribution: {report.distro} (package manager: {report.package_manager or 'unknown'})")
+    if report.missing:
+        cmd = report.install_command()
+        hint = (f"Run:\n  {cmd}\nthen run `voice-clone setup --inference-only` again." if cmd
+                else "Install them and try again.")
+        raise UserError(f"missing system tools: {', '.join(report.missing)}.\n{hint}")
+    info("FFmpeg: present")
+    if not ffmpeg_has_rubberband():
+        warn("this FFmpeg has no rubberband filter: everything works except the pitch option")
+    step("Speech engine")
+    info(inference_engine())
+    step("Setup complete (inference only)")
+    info("Add a model, then speak with it:\n"
+         "  voice-clone models import VOICE.onnx [VOICE.onnx.json]   (a model trained on another machine)\n"
+         "  voice-clone models catalog --lang it                     (or Piper's official voices)\n"
+         "  voice-clone speak MODEL \"Some text.\" -o out.wav          (or: voice-clone web)")
+
+
 def doctor() -> None:
     """Report what is installed, without installing anything."""
     device = settings.device()
@@ -243,4 +292,10 @@ def doctor() -> None:
         except (subprocess.SubprocessError, OSError, ValueError):
             line(False, "speech.cpp devices failed")
     line(piper_ready(device), f"Piper training environment ({device.upper()})")
-    print("Everything is ready." if ok else "Run `voice-clone setup` to install what is missing.")
+    try:
+        engine = inference_engine()
+        line(True, f"speech engine for the studio: {engine}")
+    except UserError:
+        line(False, "speech engine for the studio (piper-tts): does not import")
+    print("Everything is ready." if ok else "Run `voice-clone setup` to install what is missing "
+          "(`setup --inference-only` if this machine only speaks with ready models).")

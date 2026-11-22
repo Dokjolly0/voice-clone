@@ -58,3 +58,35 @@ def test_speech_gets_cpu_device_only_in_cpu_mode(monkeypatch):
     assert installer.device_args() == ["--device", "cpu"]
     monkeypatch.setenv("VOICE_CLONE_DEVICE", "gpu")
     assert installer.device_args() == []
+
+
+def test_inference_only_checks_just_ffmpeg(monkeypatch):
+    monkeypatch.setattr(system, "_present", lambda req: False)
+    full = system.check("gpu").missing
+    assert {"git", "lib:vulkan"} <= set(full)
+    missing = system.check("gpu", inference_only=True).missing
+    assert set(missing) == {"ffmpeg", "ffprobe"}
+
+
+def test_rubberband_is_found_in_ffmpeg_filters(monkeypatch):
+    from voice_clone import installer
+
+    rubberband = " ... rubberband        A->A       Apply time-stretching and pitch-shifting.\n"
+    volume = " ... volume            A->A       Change input volume.\n"
+    for out, expected in [(rubberband + volume, True), (volume, False)]:
+        monkeypatch.setattr(installer.subprocess, "run", lambda *a, out=out, **k: type("R", (), {"stdout": out})())
+        assert installer.ffmpeg_has_rubberband() is expected
+
+
+def test_setup_inference_only_rejects_training_options(monkeypatch):
+    from voice_clone import cli, installer
+
+    called = []
+    monkeypatch.setattr(installer, "setup_inference", lambda: called.append("inference"))
+    monkeypatch.setattr(installer, "setup", lambda **k: called.append("full"))
+    cli.build_parser().parse_args(["setup", "--inference-only"]).func(
+        cli.build_parser().parse_args(["setup", "--inference-only"]))
+    assert called == ["inference"]
+    args = cli.build_parser().parse_args(["setup", "--inference-only", "--device", "cpu"])
+    with pytest.raises(UserError):
+        args.func(args)

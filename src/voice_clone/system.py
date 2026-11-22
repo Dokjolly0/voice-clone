@@ -33,6 +33,7 @@ REQUIREMENTS = {
     "msvc": {"winget": "Microsoft.VisualStudio.2022.BuildTools"},
 }
 GPU_ONLY = {"lib:vulkan"}  # speech.cpp's GPU build; the CPU mode does without
+INFERENCE_ONLY = {"ffmpeg", "ffprobe"}  # all that speaking with a ready model needs (setup --inference-only)
 VULKAN_LIB = {"win": "vulkan-1", "linux": "vulkan"}
 
 # winget options per package: the Build Tools need the C++ workload, which Piper's compiled parts are built with.
@@ -179,10 +180,15 @@ def ram_gib() -> float:
         return 0.0
 
 
-def check(device: str = "gpu") -> SystemReport:
-    """System packages needed in the given mode ("gpu" or "cpu"), the GPU if any, and the RAM."""
+def check(device: str = "gpu", inference_only: bool = False) -> SystemReport:
+    """System packages needed in the given mode ("gpu" or "cpu"), the GPU if any, and the RAM.
+
+    With inference_only, only the packages the audio studio needs (FFmpeg): no compilers, Git or Vulkan.
+    """
     report = SystemReport(distro=os_name(), package_manager=detect_package_manager())
     for req, packages in REQUIREMENTS.items():
+        if inference_only and req not in INFERENCE_ONLY:
+            continue
         if device == "cpu" and req in GPU_ONLY:
             continue
         if not needed_here(packages):

@@ -1,7 +1,8 @@
 # Installation
 
-Everything is installed by two commands, `setup` and the launcher itself. Nothing needs root (Linux) or
-administrator rights (Windows), except the system packages, for which `doctor` and `setup` print the exact command.
+Everything is installed by two commands, `setup` and the launcher itself (only the launcher and
+[`setup --inference-only`](#inference-only-setup) on a machine that just speaks with ready models).
+Nothing needs root (Linux) or administrator rights (Windows), except the system packages, for which `doctor` and `setup` print the exact command.
 
 ## The launcher
 
@@ -94,6 +95,27 @@ Steps, in order (`installer.setup`):
 
 Running `setup` again is cheap: every part already in place is skipped.
 
+## Inference-only setup
+
+```
+voice-clone setup --inference-only
+```
+
+For a machine that only speaks with ready models (`installer.setup_inference`). It does not choose a mode, write
+`settings.json`, install speech.cpp, clone Piper or download models. Steps:
+
+1. **Check the system** with `system.check(inference_only=True)`: only `ffmpeg` and `ffprobe` (the `INFERENCE_ONLY`
+   set in `system.py`); when missing it fails with the install command, as the full setup does. A warning follows
+   when FFmpeg has no `rubberband` filter (`ffmpeg -filters`): everything works except the studio's pitch option.
+2. **Check the speech engine** (`inference_engine`): imports `piper.PiperVoice` and `onnxruntime` from the app's own
+   environment, which the launcher's `uv sync` already installed, and prints their versions.
+3. Prints how to add a model (`models import`, `models catalog`) and speak with it (`speak`, `web`).
+
+`--device` and `--skip-models` do not apply and are refused together with `--inference-only`. What then works:
+`models`, `speak`, `lexicon`, `web` (the studio's pages), and `say NAME` for a voice whose `voices/NAME/` (with `export/`) was
+copied over. `export`, `compare` and the dataset and training stages need the full `setup`. Running the full `setup`
+later on the same machine is fine: it adds the rest.
+
 ## `voice-clone doctor`
 
 Reports without changing anything:
@@ -107,6 +129,7 @@ Mode: GPU
   [ok] speech.cpp
   [ok] speech.cpp sees the GPU
   [ok] Piper training environment (GPU)
+  [ok] speech engine for the studio: piper-tts 1.8.0, onnxruntime 1.32.0
 Everything is ready.
 ```
 

@@ -14,6 +14,7 @@ Errors the user can fix are printed as `error: …` with exit code 1 (`UserError
 | Command | What it does |
 |---|---|
 | `setup [--device auto\|gpu\|cpu] [--skip-models]` | Installs speech.cpp, Piper's training environment and the models; checks the system ([details](installation.md#voice-clone-setup)) |
+| `setup --inference-only` | Only for speaking with ready models: checks FFmpeg and the speech engine, installs nothing for training ([details](installation.md#inference-only-setup)) |
 | `doctor` | Reports what is installed, changes nothing |
 | `languages` | Lists the supported languages with their base voice |
 
