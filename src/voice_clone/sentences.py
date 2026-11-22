@@ -4,6 +4,10 @@ Sentences come from Common Voice (server/data/<locale>/*.txt in github.com/commo
 CC0), filtered to plain sentences that a TTS model reads one way only: no digits, abbreviations or symbols. Optional
 domain sentences (product names, the phrases the voice will really say) go first.
 
+Most sentences are 30-150 characters, but a share (15%) is short (12-29): a model that never heard a short sentence
+rushes greetings and replies with an odd intonation. Short ones come from the curated collections first, because
+Wikipedia's short lines are mostly titles, fragments and foreign names.
+
 sentences.txt is append-only: line N is clip N, so growing the dataset later keeps every clip already made.
 """
 
@@ -25,6 +29,7 @@ POOL_FACTOR = 20  # download until there are this many raw lines per wanted sent
 # Characters that make a reading ambiguous or are not speech.
 BAD_CHARS = re.compile(r"[\d#$%&*+/<=>@\\^_`{|}~\[\]()§°€£¥]")
 ALL_CAPS_WORD = re.compile(r"\b[^\W\d_]{2,}\b")
+ABBREVIATION_END = re.compile(r"\b[A-Z][a-z]{0,2}\.$|(?:^|\s)[a-z]{1,3}\.$")  # "...Vol.", "...l'art." cut short
 
 
 def _fetch_json(url: str):
@@ -79,8 +84,15 @@ def clean(sentence: str) -> str:
     return re.sub(r"\s+", " ", s)
 
 
-def acceptable(sentence: str, lang: Language) -> bool:
-    if not (lang.min_chars <= len(sentence) <= lang.max_chars):
+def acceptable(sentence: str, lang: Language, short: bool = False) -> bool:
+    low, high = (lang.short_min_chars, lang.min_chars - 1) if short else (lang.min_chars, lang.max_chars)
+    if not (low <= len(sentence) <= high):
+        return False
+    if sentence.count('"') % 2 or sentence.count("«") != sentence.count("»"):
+        return False
+    if ABBREVIATION_END.search(sentence):
+        return False
+    if short and lang.code != "zh" and len(sentence.split()) < 2:  # one word is a title, not a sentence
         return False
     if BAD_CHARS.search(sentence):
         return False
@@ -94,15 +106,24 @@ def acceptable(sentence: str, lang: Language) -> bool:
     return True
 
 
-def pool(lang: Language, wanted: int) -> list[str]:
+def pool(lang: Language, wanted: int, short: bool = False) -> list[str]:
+    """Acceptable sentences in a fixed random order. Short ones: curated files first, Wikipedia only if needed."""
+    files = corpus_files(lang, wanted)
+    groups = [[f for f in files if not f.name.startswith("wiki")], [f for f in files if f.name.startswith("wiki")]] \
+        if short else [files]
     seen, result = set(), []
-    for path in corpus_files(lang, wanted):
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            s = clean(line)
-            if s and s not in seen and acceptable(s, lang):
-                seen.add(s)
-                result.append(s)
-    random.Random(42).shuffle(result)
+    for group in groups:
+        found = []
+        for path in group:
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                s = clean(line)
+                if s and s not in seen and acceptable(s, lang, short):
+                    seen.add(s)
+                    found.append(s)
+        random.Random(42).shuffle(found)
+        result += found
+        if len(result) >= wanted:
+            break
     return result
 
 
@@ -132,15 +153,21 @@ def choose(voice: Voice, count: int, extra: Path | None = None) -> list[str]:
         info(f"{len(domain)} domain sentences from {extra.name}")
     need = count - len(chosen)
     if need > 0:
-        for s in pool(lang, need):
-            if s not in seen:
-                chosen.append(s)
-                seen.add(s)
-                need -= 1
-                if need == 0:
+        short_need = round(need * lang.short_share)
+        added = 0
+        for short, quota in ((True, short_need), (False, need - short_need)):
+            taken = 0
+            for s in pool(lang, quota, short=short):
+                if taken >= quota:
                     break
-        if need > 0:
-            warn(f"Common Voice has only {count - need} usable {lang.name} sentences; the dataset will be smaller")
+                if s not in seen:
+                    chosen.append(s)
+                    seen.add(s)
+                    taken += 1
+            added += taken
+        missing = need - added
+        if missing > 0:
+            warn(f"Common Voice has only {added} more usable {lang.name} sentences; the dataset will be smaller")
 
     voice.sentences_file.write_text("\n".join(chosen) + "\n", encoding="utf-8")
     added = len(chosen) - len(existing)

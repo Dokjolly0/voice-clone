@@ -16,6 +16,8 @@ class Language:
     checkpoint: str      # folder under rhasspy/piper-checkpoints, quality "medium"
     min_chars: int = 30  # sentence length bounds for the dataset
     max_chars: int = 150
+    short_min_chars: int = 12   # short sentences (short_min_chars..min_chars-1) teach greetings, replies...
+    short_share: float = 0.15   # ...and make up this share of the sentences added
     chars_per_second: float = 15.0  # speaking rate, only for duration estimates
     samples: tuple[str, ...] = ()   # test sentences for `voice-clone export`
 
@@ -90,7 +92,7 @@ LANGUAGES = {lang.code: lang for lang in [
         "Xin chào, hôm nay tôi có thể giúp gì cho bạn?",
     )),
     Language("zh", "Chinese (Mandarin)", "zh-CN", "zh/zh_CN/huayan/medium",
-             min_chars=8, max_chars=50, chars_per_second=4.5, samples=(
+             min_chars=8, max_chars=50, short_min_chars=4, chars_per_second=4.5, samples=(
         "早上好，今天我能为您做些什么？",
     )),
 ]}
