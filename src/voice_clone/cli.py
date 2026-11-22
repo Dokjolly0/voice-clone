@@ -64,7 +64,8 @@ def cmd_remove_audio(args):
 def cmd_reference(args):
     from voice_clone import reference, workspace
 
-    reference.build(workspace.load(args.name), max_seconds=args.max_seconds, retranscribe=args.retranscribe)
+    reference.build(workspace.load(args.name), max_seconds=args.max_seconds, retranscribe=args.retranscribe,
+                    voice_file=args.voice_file, from_inputs=args.from_inputs)
 
 
 def cmd_try_voice(args):
@@ -100,7 +101,7 @@ def train_settings(args):
     from voice_clone.train import Settings
 
     return Settings(epochs=args.epochs, batch_size=args.batch_size, num_workers=args.num_workers,
-                    resume=getattr(args, "resume", False))
+                    resume=getattr(args, "resume", False), init_from=getattr(args, "init_from", None))
 
 
 def cmd_train(args):
@@ -329,6 +330,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-seconds", type=float, default=30.0,
                    help="longest reference Drama 3 hears, cut at a pause (default 30)")
     p.add_argument("--retranscribe", action="store_true", help="discard transcript.txt and recognize it again")
+    p.add_argument("--voice-file", type=Path, help="use an existing Drama 3 voice (.gguf) instead of the inputs")
+    p.add_argument("--from-inputs", action="store_true", help="drop an imported voice file and build from the inputs")
     p.set_defaults(func=cmd_reference)
 
     p = sub.add_parser("try-voice", help="speak one sentence with Drama 3, to check the cloned voice")
@@ -491,6 +494,8 @@ def add_train_args(p: argparse.ArgumentParser, resume: bool = True) -> None:
     p.add_argument("--num-workers", type=int, default=4, help="data loader processes (default 4)")
     if resume:
         p.add_argument("--resume", action="store_true", help="continue from the last checkpoint")
+        p.add_argument("--init-from", type=Path, metavar="CKPT",
+                       help="start from this checkpoint (e.g. a voice trained elsewhere) instead of the base voice")
 
 
 def add_dataset_args(p: argparse.ArgumentParser) -> None:

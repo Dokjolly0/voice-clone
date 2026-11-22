@@ -31,6 +31,7 @@ class Settings:
     batch_size: int = 0   # 0: chosen from the GPU's memory
     num_workers: int = 4
     resume: bool = False
+    init_from: Path | None = None  # start from this checkpoint instead of the language's base voice
 
 
 def batch_for_vram(memory_mib: int) -> int:
@@ -157,7 +158,13 @@ def command(voice: Voice, settings: Settings) -> list[str]:
         if last_checkpoint(voice):
             warn("starting a new training run from the base voice; the previous run's checkpoints stay in "
                  "training/lightning_logs (use --resume to continue it instead)")
-        cmd += ["--model.warmstart_ckpt", str(base)]
+        start = base
+        if settings.init_from:
+            if not Path(settings.init_from).is_file():
+                raise UserError(f"checkpoint not found: {settings.init_from}")
+            start = Path(settings.init_from)
+            info(f"starting from {start} instead of the base voice")
+        cmd += ["--model.warmstart_ckpt", str(start)]
     return cmd
 
 

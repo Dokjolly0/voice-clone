@@ -8,9 +8,13 @@
 4. `speech voice drama-3` builds voice.gguf.
 
 Each step is redone only when what it depends on changed.
+
+A voice file made elsewhere (e.g. with `speech voice` from several recordings) can be used instead:
+`reference --voice-file x.voice.gguf`. The inputs are then not merged until `reference --from-inputs`.
 """
 
 import hashlib
+import shutil
 from pathlib import Path
 
 from voice_clone import audio, speech
@@ -118,7 +122,31 @@ def build_voice(voice: Voice, text: str) -> None:
     info(f"voice: {p['voice']}")
 
 
-def build(voice: Voice, max_seconds: float = DEFAULT_MAX_SECONDS, retranscribe: bool = False) -> None:
+def import_voice(voice: Voice, gguf: Path) -> None:
+    """Use an existing Drama 3 voice file as this voice's reference."""
+    if not gguf.is_file() or gguf.suffix != ".gguf":
+        raise UserError(f"not a voice file (.gguf): {gguf}")
+    p = paths(voice)
+    voice.reference_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(gguf, p["voice"])
+    write_json(p["meta"], {"imported_voice": gguf.name})
+    info(f"using the Drama 3 voice {gguf.name}; the input recordings are not merged (`--from-inputs` to do so)")
+
+
+def build(voice: Voice, max_seconds: float = DEFAULT_MAX_SECONDS, retranscribe: bool = False,
+          voice_file: Path | None = None, from_inputs: bool = False) -> None:
+    p = paths(voice)
+    if voice_file:
+        import_voice(voice, voice_file)
+        return
+    meta = read_json(p["meta"], {})
+    if meta.get("imported_voice") and not from_inputs:
+        if p["voice"].exists():
+            info(f"voice.gguf is the imported {meta['imported_voice']} (`--from-inputs` to build it from the inputs)")
+            return
+    if meta.get("imported_voice"):
+        p["meta"].unlink(missing_ok=True)
+        p["voice"].unlink(missing_ok=True)
     merge(voice, max_seconds)
     if retranscribe:
         paths(voice)["transcript"].unlink(missing_ok=True)
@@ -144,5 +172,5 @@ def status(voice: Voice) -> dict:
     meta = read_json(p["meta"], {})
     transcript = p["transcript"].read_text(encoding="utf-8").strip() if p["transcript"].exists() else None
     return {"reference_seconds": meta.get("reference_seconds") if p["reference"].exists() else None,
-            "transcript": transcript, "voice": p["voice"].exists()}
+            "transcript": transcript, "voice": p["voice"].exists(), "imported": meta.get("imported_voice")}
 

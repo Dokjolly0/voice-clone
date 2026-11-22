@@ -36,7 +36,9 @@ def format_status(s: dict) -> str:
     ref, data, tr = s["reference"], s["dataset"], s["training"]
     lines = [f"{s['name']} ({s['language']})"]
     lines.append(f"  {mark(s['inputs'] > 0)} 1. audio      {s['inputs']} files, {s['input_seconds']:.1f} s")
-    if ref["reference_seconds"]:
+    if ref.get("imported") and ref["voice"]:
+        ref_text = f"imported voice {ref['imported']}"
+    elif ref["reference_seconds"]:
         ref_text = (f"{ref['reference_seconds']:.1f} s, transcript {'yes' if ref['transcript'] else 'no'}, "
                     f"voice {'yes' if ref['voice'] else 'no'}")
     else:

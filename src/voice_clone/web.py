@@ -239,7 +239,9 @@ def reference_view(name: str | None):
     p = reference.paths(voice)
     transcript = p["transcript"].read_text(encoding="utf-8").strip() if p["transcript"].exists() else ""
     st = reference.status(voice)
-    if st["voice"]:
+    if st.get("imported") and st["voice"]:
+        summary = f"✓ Voce pronta, importata da {st['imported']}."
+    elif st["voice"]:
         summary = f"✓ Voce pronta, da {st['reference_seconds']:.0f} secondi di riferimento."
     elif st["reference_seconds"]:
         summary = "Riferimento pronto, manca ancora la voce per Drama 3."
