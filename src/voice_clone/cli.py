@@ -85,7 +85,8 @@ def cmd_sentences(args):
 def dataset_settings(args):
     from voice_clone.dataset import Settings
 
-    return Settings(max_attempts=args.max_attempts, max_cer=args.max_cer, limit=args.limit)
+    return Settings(max_attempts=args.max_attempts, max_cer=args.max_cer, limit=args.limit,
+                    short_best_of=args.short_best_of, redo_short=getattr(args, "redo_short", False))
 
 
 def cmd_dataset(args):
@@ -503,6 +504,11 @@ def add_dataset_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--max-cer", type=float, default=0.05,
                    help="largest character error rate a clip may have to be kept (0.05)")
     p.add_argument("--limit", type=int, default=0, help="generate at most N clips, for a quick test")
+    p.add_argument("--short-best-of", type=int, default=5, metavar="N",
+                   help="takes per short sentence; the one closest to the voice's usual pitch and rate is kept "
+                        "(default 5, 1 = off)")
+    p.add_argument("--redo-short", action="store_true",
+                   help="regenerate short sentences that were made with a single take")
 
 
 def add_sentence_args(p: argparse.ArgumentParser) -> None:
