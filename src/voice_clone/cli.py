@@ -258,6 +258,10 @@ def cmd_speak(args):
         if total > 3:
             print(f"\r{done}/{total}", end="", file=sys.stderr, flush=True)
 
+    if args.per_line:
+        results = synthesis.generate_per_line(model, text, args.per_line, speak_options(args), progress=report)
+        print(f"\n{len(results)} files in {args.per_line}", file=sys.stderr)
+        return
     result = synthesis.generate(model, text, out, speak_options(args), progress=report)
     print(f"\n{result.path} ({result.seconds:.1f} s, {result.format}, {result.sample_rate} Hz)", file=sys.stderr)
 
@@ -396,6 +400,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("text", nargs="?", help="the text; blank lines separate paragraphs, [pausa 1.5s] adds a pause")
     p.add_argument("--file", type=Path, help="read the text from a file instead")
     p.add_argument("-o", "--output", type=Path, help="output file (the extension follows --format)")
+    p.add_argument("--per-line", type=Path, metavar="FOLDER",
+                   help="one file per non-empty line into FOLDER (001-first-words.mp3, ...)")
     add_speak_args(p)
     p.set_defaults(func=cmd_speak)
 

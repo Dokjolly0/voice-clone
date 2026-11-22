@@ -265,3 +265,37 @@ def preview(model: Model, text: str, out: Path, options: Options | None = None) 
     if first is None:
         raise UserError("there is nothing to say: the text is empty")
     return generate(model, first, out, options)
+
+
+def _slug(text: str, limit: int = 40) -> str:
+    import unicodedata
+
+    ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_text.lower()).strip("-")
+    return slug[:limit].rstrip("-") or "line"
+
+
+def generate_per_line(model: Model, text: str, out_dir: Path, options: Options | None = None,
+                      progress: Callable[[int, int], None] | None = None) -> list[Result]:
+    """One file per non-empty line (e.g. a kiosk's messages): 001-first-words.mp3, 002-..., in out_dir."""
+    options = (options or Options()).validate()
+    lines = [l.strip() for l in text.replace("\r\n", "\n").split("\n") if l.strip()]
+    if not lines:
+        raise UserError("there is nothing to say: the text is empty")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    results = []
+    for n, line in enumerate(lines, 1):
+        out = out_dir / f"{n:03d}-{_slug(line)}"
+        results.append(generate(model, line, out, options))
+        if progress:
+            progress(n, len(lines))
+    return results
+
+
+def zip_files(files: list[Path], zip_path: Path) -> Path:
+    import zipfile
+
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as z:  # audio is already compressed
+        for f in files:
+            z.write(f, arcname=f.name)
+    return zip_path
