@@ -1,29 +1,45 @@
-"""Checks the machine: distribution, system packages, NVIDIA driver, Vulkan.
+"""Checks the machine: operating system, system packages, NVIDIA driver, Vulkan.
 
-Nothing here needs root. When system packages are missing, the user gets the single sudo command to run.
+Nothing here needs root or administrator rights. When system packages are missing, the user gets the commands to
+run: one sudo command on Linux (dnf or apt), winget commands on Windows.
 """
 
 import ctypes.util
+import os
+import platform
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import psutil
+
+from voice_clone import host
 from voice_clone.util import which
 
-# Command (or shared library) -> package name, per package manager.
+# Command (or "lib:" shared library, or "msvc") -> package name, per package manager. A requirement without an entry
+# for a package manager is not needed on that system: on Windows cmake and ninja come from pip in Piper's
+# environment, and the C/C++ compilers are Visual Studio's Build Tools.
 REQUIREMENTS = {
-    "git": {"dnf": "git", "apt": "git"},
+    "git": {"dnf": "git", "apt": "git", "winget": "Git.Git"},
     "curl": {"dnf": "curl", "apt": "curl"},
     "gcc": {"dnf": "gcc", "apt": "build-essential"},
     "g++": {"dnf": "gcc-c++", "apt": "build-essential"},
     "make": {"dnf": "make", "apt": "build-essential"},
     "cmake": {"dnf": "cmake", "apt": "cmake"},
     "ninja": {"dnf": "ninja-build", "apt": "ninja-build"},
-    "ffmpeg": {"dnf": "ffmpeg-free", "apt": "ffmpeg"},
-    "ffprobe": {"dnf": "ffmpeg-free", "apt": "ffmpeg"},
-    "lib:vulkan": {"dnf": "vulkan-loader", "apt": "libvulkan1"},
+    "ffmpeg": {"dnf": "ffmpeg-free", "apt": "ffmpeg", "winget": "Gyan.FFmpeg"},
+    "ffprobe": {"dnf": "ffmpeg-free", "apt": "ffmpeg", "winget": "Gyan.FFmpeg"},
+    "lib:vulkan": {"dnf": "vulkan-loader", "apt": "libvulkan1", "winget": "NVIDIA driver"},
+    "msvc": {"winget": "Microsoft.VisualStudio.2022.BuildTools"},
 }
 GPU_ONLY = {"lib:vulkan"}  # speech.cpp's GPU build; the CPU mode does without
+VULKAN_LIB = {"win": "vulkan-1", "linux": "vulkan"}
+
+# winget options per package: the Build Tools need the C++ workload, which Piper's compiled parts are built with.
+WINGET_OPTIONS = {
+    "Microsoft.VisualStudio.2022.BuildTools":
+        '--override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"',
+}
 
 # Drama 3 keeps about 21 GB in RAM when it runs on the CPU (and ~15 GB alongside a GPU with little VRAM).
 MIN_RAM_GIB = {"gpu": 16, "cpu": 30}
@@ -37,6 +53,8 @@ DRIVER_HELP = {
         "With Secure Boot enabled the module must be signed: see RPM Fusion's NVIDIA guide."
     ),
     "apt": "Install the NVIDIA driver, then reboot:\n  sudo ubuntu-drivers install",
+    "winget": ("Install the NVIDIA driver (Game Ready or Studio) from https://www.nvidia.com/drivers or the NVIDIA "
+               "app, then restart Windows. It also provides nvidia-smi and Vulkan."),
 }
 
 
@@ -59,12 +77,23 @@ class SystemReport:
     def missing_packages(self) -> list[str]:
         if not self.package_manager:
             return []
-        return sorted({REQUIREMENTS[m][self.package_manager] for m in self.missing})
+        return sorted({REQUIREMENTS[m][self.package_manager] for m in self.missing
+                       if self.package_manager in REQUIREMENTS[m]})
 
     def install_command(self) -> str | None:
+        """The command(s) that install the missing packages; on Windows one winget command per line."""
         pkgs = self.missing_packages
         if not pkgs:
             return None
+        if self.package_manager == "winget":
+            lines = []
+            for pkg in pkgs:
+                if pkg == "NVIDIA driver":
+                    lines.append("install the NVIDIA driver from https://www.nvidia.com/drivers")
+                    continue
+                extra = f" {WINGET_OPTIONS[pkg]}" if pkg in WINGET_OPTIONS else ""
+                lines.append(f"winget install -e --id {pkg}{extra}")
+            return "\n  ".join(lines) + "\n  (then open a new terminal, so PATH includes the new tools)"
         if self.package_manager == "apt":
             return "sudo apt update && sudo apt install -y " + " ".join(pkgs)
         return "sudo dnf install -y " + " ".join(pkgs)
@@ -80,11 +109,48 @@ def read_os_release(path: Path = Path("/etc/os-release")) -> dict[str, str]:
     return data
 
 
+def os_name() -> str:
+    if host.IS_WINDOWS:
+        return f"Windows {platform.release()} ({platform.version()})"
+    return read_os_release().get("PRETTY_NAME", "unknown Linux")
+
+
 def detect_package_manager() -> str | None:
+    if host.IS_WINDOWS:
+        return "winget"
     for pm in ("dnf", "apt"):
         if which(pm):
             return pm
     return None
+
+
+def find_msvc() -> str | None:
+    """The folder of a Visual Studio (or Build Tools) installation with the C++ compilers, found with vswhere."""
+    vswhere = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / \
+        "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
+    if not vswhere.exists():
+        return None
+    try:
+        out = subprocess.run([str(vswhere), "-latest", "-products", "*", "-requires",
+                              "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"],
+                             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60).stdout
+    except (subprocess.SubprocessError, OSError):
+        return None
+    return out.strip().splitlines()[0] if out.strip() else None
+
+
+def needed_here(packages: dict) -> bool:
+    """Whether a requirement applies to this operating system."""
+    return "winget" in packages if host.IS_WINDOWS else bool({"dnf", "apt"} & packages.keys())
+
+
+def _present(req: str) -> bool:
+    if req == "msvc":
+        return find_msvc() is not None
+    if req.startswith("lib:"):
+        name = VULKAN_LIB["win" if host.IS_WINDOWS else "linux"] if req == "lib:vulkan" else req[4:]
+        return ctypes.util.find_library(name) is not None
+    return which(req) is not None
 
 
 def query_gpu() -> GpuInfo | None:
@@ -108,25 +174,20 @@ def query_gpu() -> GpuInfo | None:
 
 def ram_gib() -> float:
     try:
-        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
-            if line.startswith("MemTotal:"):
-                return int(line.split()[1]) / 1024 / 1024
-    except OSError:
-        pass
-    return 0.0
+        return psutil.virtual_memory().total / 1024 ** 3
+    except (OSError, RuntimeError):
+        return 0.0
 
 
 def check(device: str = "gpu") -> SystemReport:
     """System packages needed in the given mode ("gpu" or "cpu"), the GPU if any, and the RAM."""
-    osr = read_os_release()
-    report = SystemReport(distro=osr.get("PRETTY_NAME", "unknown Linux"), package_manager=detect_package_manager())
-    for req in REQUIREMENTS:
+    report = SystemReport(distro=os_name(), package_manager=detect_package_manager())
+    for req, packages in REQUIREMENTS.items():
         if device == "cpu" and req in GPU_ONLY:
             continue
-        if req.startswith("lib:"):
-            if not ctypes.util.find_library(req[4:]):
-                report.missing.append(req)
-        elif not which(req):
+        if not needed_here(packages):
+            continue
+        if not _present(req):
             report.missing.append(req)
     report.gpu = query_gpu()
     report.ram_gib = ram_gib()
