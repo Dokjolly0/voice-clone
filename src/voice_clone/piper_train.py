@@ -49,7 +49,7 @@ class EpochMetrics(Callback):
         progress = {"epoch": trainer.current_epoch + 1, "max_epochs": trainer.max_epochs, "epoch_seconds": seconds,
                     "val_mel": val_mel, "updated": now}
         tmp = root / "progress.json.tmp"
-        tmp.write_text(json.dumps(progress))
+        tmp.write_text(json.dumps(progress), encoding="utf-8")
         os.replace(tmp, root / "progress.json")
 
 

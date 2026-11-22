@@ -241,7 +241,8 @@ def encode(samples: np.ndarray, model_rate: int, options: Options, out: Path) ->
             w.setsampwidth(2)
             w.setframerate(model_rate)
             w.writeframes(samples.tobytes())
-        result = subprocess.run(ffmpeg_args(raw, out, options, model_rate), capture_output=True, text=True)
+        result = subprocess.run(ffmpeg_args(raw, out, options, model_rate), capture_output=True, text=True,
+                                encoding="utf-8", errors="replace")
     if result.returncode != 0:
         raise UserError(f"ffmpeg failed: {result.stderr.strip()[-1000:]}")
     from voice_clone import audio

@@ -69,7 +69,7 @@ def base_checkpoint(voice: Voice) -> tuple[Path, dict]:
         download(HF_FILE + urllib.parse.quote(f"{folder}/config.json"), config_path)
         download(HF_FILE + urllib.parse.quote(f"{folder}/{ckpt_names[0]}"), cache / ckpt_names[0])
         ckpts = [cache / ckpt_names[0]]
-    return ckpts[0], json.loads(config_path.read_text())
+    return ckpts[0], json.loads(config_path.read_text(encoding="utf-8"))
 
 
 def last_checkpoint(voice: Voice) -> Path | None:

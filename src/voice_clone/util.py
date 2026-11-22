@@ -42,8 +42,8 @@ def run(cmd: list, *, check: bool = True, capture: bool = False, cwd: Path | Non
     info(f"$ {shlex.join(cmd)}")
     full_env = {**os.environ, **(env or {})}
     try:
-        return subprocess.run(cmd, check=check, cwd=cwd, env=full_env, text=True,
-                              capture_output=capture)
+        return subprocess.run(cmd, check=check, cwd=cwd, env=full_env, text=True, encoding="utf-8",
+                              errors="replace", capture_output=capture)
     except FileNotFoundError as exc:
         raise UserError(f"command not found: {cmd[0]}") from exc
     except subprocess.CalledProcessError as exc:

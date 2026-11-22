@@ -73,7 +73,7 @@ class SystemReport:
 def read_os_release(path: Path = Path("/etc/os-release")) -> dict[str, str]:
     data = {}
     if path.exists():
-        for line in path.read_text().splitlines():
+        for line in path.read_text(encoding="utf-8").splitlines():
             if "=" in line:
                 key, value = line.split("=", 1)
                 data[key] = value.strip().strip('"')
@@ -94,7 +94,8 @@ def query_gpu() -> GpuInfo | None:
     try:
         out = subprocess.run(
             ["nvidia-smi", "--query-gpu=name,memory.total,driver_version", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, check=True, timeout=30,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
+            timeout=30,
         ).stdout
     except (subprocess.SubprocessError, OSError):
         return None
@@ -107,7 +108,7 @@ def query_gpu() -> GpuInfo | None:
 
 def ram_gib() -> float:
     try:
-        for line in Path("/proc/meminfo").read_text().splitlines():
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
             if line.startswith("MemTotal:"):
                 return int(line.split()[1]) / 1024 / 1024
     except OSError:

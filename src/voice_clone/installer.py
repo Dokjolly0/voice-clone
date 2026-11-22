@@ -42,7 +42,8 @@ def speech_bin() -> str:
 
 
 def speech_gpus() -> list[dict]:
-    out = subprocess.run([speech_bin(), "devices", "--json"], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run([speech_bin(), "devices", "--json"], capture_output=True, text=True, encoding="utf-8",
+                         errors="replace", check=True).stdout
     return [d for d in json.loads(out).get("devices", []) if d.get("kind") == "gpu"]
 
 
@@ -115,12 +116,14 @@ def pull_models() -> None:
 
 
 def _piper_check(device: str) -> subprocess.CompletedProcess:
-    return subprocess.run([str(PIPER_PYTHON), "-c", PIPER_CHECK, device], capture_output=True, text=True)
+    return subprocess.run([str(PIPER_PYTHON), "-c", PIPER_CHECK, device], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
 
 
 def piper_ready(device: str | None = None) -> bool:
     device = device or settings.device()
-    if not (PIPER_MARKER.exists() and PIPER_MARKER.read_text().split()[:1] == [PIPER_REV] and PIPER_PYTHON.exists()):
+    marker = PIPER_MARKER.read_text(encoding="utf-8").split() if PIPER_MARKER.exists() else []
+    if not (marker[:1] == [PIPER_REV] and PIPER_PYTHON.exists()):
         return False
     return _piper_check(device).returncode == 0
 
@@ -144,7 +147,7 @@ def install_piper(device: str) -> None:
         run([uv, "venv", "--seed", "--python", "3.12", PIPER_DIR / ".venv"])
     # GPU: PyPI's PyTorch, which is built with CUDA. CPU: the CPU-only build, without ~3 GB of CUDA libraries.
     # When the mode changed since the last install, PyTorch is reinstalled in place.
-    previous = PIPER_MARKER.read_text().split()[1:2] if PIPER_MARKER.exists() else []
+    previous = PIPER_MARKER.read_text(encoding="utf-8").split()[1:2] if PIPER_MARKER.exists() else []
     previous_device = previous[0] if previous else ("gpu" if PIPER_MARKER.exists() else None)
     backend = ["--torch-backend", "cpu"] if device == "cpu" else []
     if previous_device and previous_device != device:
@@ -165,7 +168,7 @@ def install_piper(device: str) -> None:
     if result.returncode != 0:
         raise UserError("Piper was installed but does not work:\n" + result.stderr.strip()[-2000:])
     info(result.stdout.strip())
-    PIPER_MARKER.write_text(f"{PIPER_REV} {device}\n")
+    PIPER_MARKER.write_text(f"{PIPER_REV} {device}\n", encoding="utf-8")
 
 
 def setup(skip_models: bool = False, device: str = "auto") -> None:

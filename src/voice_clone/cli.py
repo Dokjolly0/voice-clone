@@ -1,6 +1,7 @@
 """Command line interface: `voice-clone <command>`."""
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -522,7 +523,17 @@ def add_sentence_args(p: argparse.ArgumentParser) -> None:
                    help="text file of domain sentences, one per line, always included first")
 
 
+def _utf8_io() -> None:
+    """Print and pass text as UTF-8 everywhere: Windows consoles and pipes default to a legacy code page, and
+    child Python processes (jobs, Piper's environment) inherit PYTHONUTF8."""
+    os.environ.setdefault("PYTHONUTF8", "1")
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure") and (stream.encoding or "").lower().replace("-", "") != "utf8":
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> None:
+    _utf8_io()
     parser = build_parser()
     argv = sys.argv[1:] if argv is None else argv
     args = parser.parse_args(argv)

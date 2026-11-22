@@ -44,7 +44,8 @@ def measure(paths: list[Path]) -> dict[str, dict]:
         return {}
     if not piper_ready():
         raise UserError("measuring prosody needs Piper's environment: run `voice-clone setup`")
-    result = subprocess.run([str(PIPER_PYTHON), __file__, *map(str, paths)], capture_output=True, text=True)
+    result = subprocess.run([str(PIPER_PYTHON), __file__, *map(str, paths)], capture_output=True, text=True,
+                            encoding="utf-8", errors="replace")
     if result.returncode != 0:
         raise UserError(f"prosody measurement failed: {result.stderr.strip()[-1500:]}")
     rows = [json.loads(l) for l in result.stdout.splitlines() if l.startswith("{")]
